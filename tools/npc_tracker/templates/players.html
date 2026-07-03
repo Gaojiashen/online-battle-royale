@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}玩家面板 · 隐秘爱丁堡{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>👤 玩家面板</h1>
+    <button class="btn btn-primary" onclick="addPlayer()">+ 添加玩家</button>
+</div>
+
+<div class="player-grid">
+    {% for p in players %}
+    <div class="player-card {% if p.status != 'active' %}card-inactive{% endif %}">
+        <a href="/player/{{ p.id }}/panel" style="display:block;color:var(--text);text-decoration:none;">
+        <div class="card-header">
+            <span class="card-name">{{ p.name }}</span>
+            <span class="status-badge status-{{ 'alive' if p.status=='active' else 'injured' if p.status=='inactive' else 'dead' }}">
+                {{ {'active':'✅在线','inactive':'💤离线','dead':'💀死亡'}.get(p.status, p.status) }}
+            </span>
+        </div>
+        <div class="card-body">
+            <div class="card-row"><span class="label">位置</span><span>{{ p.current_location or '—' }}</span></div>
+            <div class="card-row"><span class="label">金币</span><span>💰 {{ p.gold }}</span></div>
+            <div class="card-row"><span class="label">锁定NPC</span>
+                <span>{% for n in p.locked_npcs %}<span class="npc-chip">{{ n.name }}</span>{% else %}—{% endfor %}</span>
+            </div>
+        </div>
+        </a>
+        <div style="display:flex;gap:6px;padding:8px 0 0;border-top:1px solid var(--border);margin-top:4px;">
+            <a href="/player/{{ p.id }}/panel" class="btn btn-primary btn-sm" style="flex:1;text-align:center;">🎮 进入面板</a>
+            <a href="/player/{{ p.id }}" class="btn btn-sm" style="text-align:center;">📋 详情</a>
+        </div>
+    </div>
+    {% else %}
+    <div class="empty-state full-width"><p>暂无玩家数据。点击上方按钮添加。</p></div>
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function addPlayer() {
+    const name = prompt('玩家名称：');
+    if (!name || !name.trim()) return;
+    fetch('/api/players', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.trim()})})
+        .then(r => r.json()).then(d => { if(d.ok) location.reload(); else showToast(d.error,'error'); });
+}
+</script>
+{% endblock %}

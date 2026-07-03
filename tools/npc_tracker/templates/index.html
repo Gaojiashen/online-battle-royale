@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}NPC总览 · 隐秘爱丁堡{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>📊 NPC 总览</h1>
+    <div class="header-info">
+        <span class="update-badge">实时</span>
+    </div>
+</div>
+
+{# 统计行 #}
+<div class="stats-row">
+    <div class="stat-item"><span class="stat-num">{{ stats.total_npcs }}</span> NPC</div>
+    <div class="stat-item"><span class="stat-num">{{ stats.alive }}</span> 存活</div>
+    <div class="stat-item dead"><span class="stat-num">{{ stats.dead }}</span> 死亡</div>
+    <div class="stat-item"><span class="stat-num">{{ stats.tier1 }}</span> T1</div>
+    <div class="stat-item"><span class="stat-num">{{ stats.tier2 }}</span> T2</div>
+    <div class="stat-item"><span class="stat-num">{{ stats.tier3 }}</span> T3</div>
+    <div class="stat-item"><span class="stat-num">{{ stats.players }}</span> 玩家</div>
+    <div class="stat-item"><span class="stat-num">{{ stats.connections }}</span> 关联</div>
+</div>
+
+{# 筛选按钮 #}
+<div class="filter-bar">
+    <span class="filter-label">Tier:</span>
+    <a href="/" class="filter-btn {% if not current_tier %}active{% endif %}">全部</a>
+    <a href="/?tier=1" class="filter-btn {% if current_tier == '1' %}active{% endif %}">T1 主线</a>
+    <a href="/?tier=2" class="filter-btn {% if current_tier == '2' %}active{% endif %}">T2 事件</a>
+    <a href="/?tier=3" class="filter-btn {% if current_tier == '3' %}active{% endif %}">T3 背景</a>
+    <span class="filter-sep">|</span>
+    <span class="filter-label">性相:</span>
+    <a href="/?aspect=灯" class="filter-btn aspect-灯 {% if current_aspect == '灯' %}active{% endif %}">🔆灯</a>
+    <a href="/?aspect=蛾" class="filter-btn aspect-蛾 {% if current_aspect == '蛾' %}active{% endif %}">🦋蛾</a>
+    <a href="/?aspect=刃" class="filter-btn aspect-刃 {% if current_aspect == '刃' %}active{% endif %}">⚔️刃</a>
+    <a href="/?aspect=铸" class="filter-btn aspect-铸 {% if current_aspect == '铸' %}active{% endif %}">🔨铸</a>
+    <a href="/?aspect=冬" class="filter-btn aspect-冬 {% if current_aspect == '冬' %}active{% endif %}">❄️冬</a>
+    <a href="/?aspect=心" class="filter-btn aspect-心 {% if current_aspect == '心' %}active{% endif %}">💓心</a>
+    <a href="/" class="filter-btn" style="margin-left:8px;">✕ 清除</a>
+</div>
+
+<div class="npc-grid">
+    {% for npc in npcs %}
+    <a href="/npc/{{ npc.id }}" class="npc-card {% if npc.status != 'alive' %}card-{{ npc.status }}{% endif %}">
+        <div class="card-header">
+            <span class="card-name">{{ npc.name }}</span>
+            {% if npc.aspect %}
+            <span class="aspect-tag aspect-{{ npc.aspect }}">{{ npc.aspect_tag }} {{ npc.aspect }}</span>
+            {% endif %}
+        </div>
+        <div class="card-title">{{ npc.title or '' }}</div>
+        <div class="card-body">
+            <div class="card-row">
+                <span class="label">状态</span>
+                <span class="status-badge status-{{ npc.status }}">
+                    {{ {'alive':'✅存活','injured':'⚠️受伤','dead':'💀死亡','missing':'❓失踪'}.get(npc.status, npc.status) }}
+                </span>
+            </div>
+            <div class="card-row">
+                <span class="label">锁</span>
+                <span class="lock-badge">{{ npc.lock_label }}</span>
+            </div>
+            {% if npc.has_storyline %}
+            <div class="card-row">
+                <span class="label">节点</span>
+                <span class="node-indicator">{{ npc.current_node }}/7</span>
+            </div>
+            {% if npc.locked_player %}
+            <div class="card-row"><span class="label">锁定者</span><span class="player-name">{{ npc.locked_player }}</span></div>
+            {% endif %}
+            {% endif %}
+            <div class="card-row"><span class="label">T</span><span>T{{ npc.tier }}</span></div>
+        </div>
+    </a>
+    {% endfor %}
+</div>
+
+<div class="section"><h2>📜 最近事件</h2>
+    <div class="event-list">
+        {% for e in events %}<div class="event-item"><span class="event-time">{{ e.created_at[:16] }}</span><span class="event-npc">{{ e.name }}</span><span class="event-desc">{{ e.description }}</span></div>
+        {% else %}<div class="event-empty">暂无事件记录</div>{% endfor %}
+    </div>
+</div>
+{% endblock %}

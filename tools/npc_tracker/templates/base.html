@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}隐秘爱丁堡 · NPC管理{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    {% block head_extra %}{% endblock %}
+</head>
+<body>
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <h2>隐秘爱丁堡</h2>
+            <p class="subtitle">法官辅助工具</p>
+        </div>
+        <a href="/" class="nav-link {% if request.url.path == '/' %}active{% endif %}">📊 总览看板</a>
+        <a href="/players" class="nav-link {% if request.url.path == '/players' %}active{% endif %}">👤 玩家面板</a>
+        <a href="/connections" class="nav-link {% if request.url.path == '/connections' %}active{% endif %}">🔗 关联视图</a>
+
+        {% if nav %}
+        <div class="nav-section-title">📖 有剧情线(T1)</div>
+        {% for n in nav.storyline %}
+        <a href="/npc/{{ n.id }}" class="nav-link npc-link {% if request.url.path == '/npc/' ~ n.id|string %}active{% endif %}">
+            {{ n.name }}{% if n.aspect %} <span class="nav-aspect">{{ n.aspect }}</span>{% endif %}
+            <span class="nav-lock">{{ {'无主':'🔓','锁定':'🔒','完结':'✅','终结':'💀'}.get(n.lock_status,'') }}</span>
+        </a>
+        {% endfor %}
+
+        <div class="nav-section-title">📋 其他T1</div>
+        {% for n in nav.tier1_other %}
+        <a href="/npc/{{ n.id }}" class="nav-link npc-link {% if request.url.path == '/npc/' ~ n.id|string %}active{% endif %}">
+            {{ n.name }}{% if n.aspect %} <span class="nav-aspect">{{ n.aspect }}</span>{% endif %}
+            <span class="nav-lock">{{ {'无主':'🔓','锁定':'🔒','完结':'✅','终结':'💀'}.get(n.lock_status,'') }}</span>
+        </a>
+        {% endfor %}
+
+        <div class="nav-section-title">📌 事件NPC(T2)</div>
+        {% for n in nav.tier2 %}
+        <a href="/npc/{{ n.id }}" class="nav-link npc-link {% if request.url.path == '/npc/' ~ n.id|string %}active{% endif %}">
+            {{ n.name }}
+        </a>
+        {% endfor %}
+
+        <div class="nav-section-title">🌿 背景NPC(T3)</div>
+        <details class="nav-details">
+            <summary>T3 背景NPC</summary>
+            {% for n in nav.tier3 %}
+            <a href="/npc/{{ n.id }}" class="nav-link npc-link small {% if request.url.path == '/npc/' ~ n.id|string %}active{% endif %}">
+                {{ n.name }}
+            </a>
+            {% endfor %}
+        </details>
+        {% endif %}
+
+        <div class="sidebar-footer">
+            <div id="connection-status" class="status-dot offline"></div>
+            <span id="status-text">等待连接...</span>
+        </div>
+    </nav>
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+    <script>
+        const statusDot = document.getElementById('connection-status');
+        const statusText = document.getElementById('status-text');
+        let ws = null;
+
+        function connectWS() {
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${proto}//${location.host}/ws`);
+            ws.onopen = () => { statusDot.className = 'status-dot online'; statusText.textContent = '已连接'; };
+            ws.onmessage = (e) => {
+                try {
+                    const msg = JSON.parse(e.data);
+                    if (msg.event === 'npc_update' && typeof window._npcId !== 'undefined'
+                        && msg.data.npc_id === window._npcId) { location.reload(); }
+                } catch (_) {}
+            };
+            ws.onclose = () => { statusDot.className = 'status-dot offline'; statusText.textContent = '已断开，重连中...'; setTimeout(connectWS, 3000); };
+            ws.onerror = () => ws.close();
+        }
+        connectWS();
+
+        function showToast(msg, type) {
+            const t = document.createElement('div');
+            t.className = 'toast toast-' + (type || 'info');
+            t.textContent = msg;
+            document.body.appendChild(t);
+            setTimeout(() => t.classList.add('show'), 10);
+            setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 2500);
+        }
+
+        async function apiPost(url, data) {
+            try {
+                const res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+                const result = await res.json();
+                if (!result.ok) throw new Error(result.error || '操作失败');
+                showToast('✅ ' + (result.title || '操作成功'), 'success');
+                return result;
+            } catch(e) { showToast('❌ ' + e.message, 'error'); throw e; }
+        }
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

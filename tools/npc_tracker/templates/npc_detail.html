@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}{{ npc.name }} · NPC管理{% endblock %}
+
+{% block content %}
+<script>window._npcId = {{ npc.id }};</script>
+
+<div class="page-header">
+    <a href="/" class="back-link">← 总览</a>
+    <h1>{{ npc.name }} {% if npc.aspect %}<span class="aspect-tag aspect-{{ npc.aspect }}">{{ npc.aspect_tag }} {{ npc.aspect }}</span>{% endif %}
+    <span class="status-badge status-{{ npc.status }}">{{ {'alive':'存活','injured':'受伤','dead':'死亡','missing':'失踪'}.get(npc.status) }}</span></h1>
+</div>
+
+<div class="detail-grid">
+    <div class="detail-card">
+        <h3>基本信息</h3>
+        <div class="info-table">
+            <div class="info-row"><span class="info-label">身份</span><span>{{ npc.title or '—' }}</span></div>
+            <div class="info-row"><span class="info-label">位置</span><span class="editable-loc" id="loc-display">{{ npc.location or '—' }}</span><button class="btn-sm" onclick="editLocation()">✏️</button></div>
+            <div class="info-row"><span class="info-label">锁状态</span><span class="lock-badge large">{{ npc.lock_label }}</span></div>
+            <div class="info-row"><span class="info-label">锁定玩家</span><span id="locked-player">{{ npc.locked_player or '—' }}</span></div>
+            <div class="info-row"><span class="info-label">Tier</span><span>T{{ npc.tier }}</span></div>
+        </div>
+
+        <div class="control-group"><h4>🔒 锁状态</h4>
+            <div class="btn-group">{% for s in lock_statuses %}
+                <button class="btn-lock" onclick="setLock('{{ s }}')" {% if npc.lock_status == s %}disabled{% endif %}>{{ s }}</button>{% endfor %}</div>
+            <div class="input-row" id="lock-player-row" style="margin-top:8px;display:none;">
+                <input type="text" id="lock-player-input" placeholder="锁定玩家姓名" value="{{ npc.locked_player or '' }}">
+                <button class="btn-sm" onclick="confirmLock()">确认</button></div></div>
+        <div class="control-group"><h4>📌 状态</h4>
+            <div class="btn-group">{% for s in npc_statuses %}
+                <button class="btn-status btn-status-{{ s }}" onclick="setNpcStatus('{{ s }}')" {% if npc.status == s %}disabled{% endif %}>{{ s }}</button>{% endfor %}</div></div>
+        <div class="control-group"><h4>📝 笔记</h4>
+            <textarea id="note-textarea" rows="3">{{ npc.notes or '' }}</textarea>
+            <button class="btn" onclick="saveNote()" style="margin-top:6px;">保存</button></div>
+
+        {# 关联NPC面板 #}
+        {% if connections %}
+        <div class="control-group"><h4>🔗 关联NPC</h4>
+            <div class="connection-list">
+            {% for c in connections %}
+            {% set other_id = c.npc_id_2 if c.npc_id_1 == npc.id else c.npc_id_1 %}
+            {% set other_name = c.name_2 if c.npc_id_1 == npc.id else c.name_1 %}
+            {% set other_aspect = c.aspect_2 if c.npc_id_1 == npc.id else c.aspect_1 %}
+            <a href="/npc/{{ other_id }}" class="connection-item">
+                <span class="conn-name">{{ other_name }}</span>
+                {% if other_aspect %}<span class="conn-aspect">{{ other_aspect }}</span>{% endif %}
+                <span class="conn-rel">{{ c.relationship }}</span>
+                {% if c.intersection_node %}<span class="conn-node">{{ c.intersection_node[:30] }}{% if c.intersection_node|length > 30 %}…{% endif %}</span>{% endif %}
+            </a>
+            {% endfor %}
+            </div></div>
+        {% endif %}
+    </div>
+
+    <div class="detail-card storyline-card">
+        <h3>剧情线 {% if npc.has_storyline %}<span class="node-progress">节点 {{ next_node_num or '完结' }}/{{ nodes|length }}</span>{% endif %}</h3>
+
+        {% if npc.has_storyline and nodes %}
+        {% if next_node_num %}
+        {% set cur = nodes | selectattr('node_number', 'equalto', next_node_num) | first %}
+        <div class="scene-panel" id="scene-panel">
+            <div class="scene-header"><span class="scene-title">节点{{ cur.node_number }} | {{ cur.title }}</span><span class="scene-loc">{{ cur.location }}</span></div>
+            <div class="scene-section"><div class="scene-label">场景描述</div><div class="scene-text" id="scene-text">{{ cur.description }}</div></div>
+            {% if current_options %}
+            <div class="scene-section"><div class="scene-label">选项</div>
+                <div class="option-list" id="option-list">{% for opt in current_options %}
+                    <div class="option-item"><span class="option-key">{{ opt.option_key }}</span><span class="option-text">{{ opt.option_text }}</span></div>{% endfor %}</div></div>
+            <div class="scene-actions"><button class="btn" onclick="copyScene()">复制场景+选项</button></div>
+            <div class="scene-section"><div class="scene-label">玩家选哪个？</div>
+                <div class="option-select-btns">{% for opt in current_options %}
+                    <button class="btn-option" onclick="chooseOption('{{ opt.option_key }}')">{{ opt.option_key }}</button>{% endfor %}</div></div>
+            <div class="result-panel" id="result-panel" style="display:none;">
+                <div class="scene-section"><div class="scene-label">所选</div><div class="result-option" id="result-option"></div></div>
+                <div class="scene-section"><div class="scene-label">结果</div><div class="result-text" id="result-text"></div></div>
+                <div class="scene-section"><div class="scene-label">玩家获得</div><div class="result-gain" id="result-gain"></div></div>
+                <div class="scene-actions"><button class="btn" onclick="copyResult()">复制结果</button>
+                    <button class="btn btn-primary" onclick="location.reload()">继续 →</button></div></div>
+            {% endif %}</div>{% endif %}
+
+        <div class="storyline-flow">{% for node in nodes %}
+            <div class="story-node {% if node.completed %}node-completed{% endif %}{% if node.node_number==next_node_num %}node-current{% endif %}{% if not node.completed and node.node_number>next_node_num %}node-future{% endif %}">
+                <div class="node-header"><span class="node-num">{% if node.completed %}✅{% elif node.node_number==next_node_num %}▶{% else %}○{% endif %} {{ node.node_number }}</span><span class="node-title">{{ node.title }}</span></div>
+                <div class="node-details"><div class="node-loc">{{ node.location }}</div><div class="node-desc">{{ node.description[:120] }}{% if node.description|length > 120 %}…{% endif %}</div>
+                    {% if node.hint %}<div class="node-hint">{{ node.hint }}</div>{% endif %}
+                    {% if node.completed_by and node.completed %}<div class="node-by">— {{ node.completed_by }}</div>{% endif %}
+                    {% if node.completed and node.node_number==last_completed_num and last_completed_num!=0 %}
+                    <button class="btn-rollback" onclick="rollbackNode({{ npc.id }})">↩ 回退</button>{% endif %}</div></div>{% endfor %}</div>
+        {% else %}<div class="empty-state"><p>该NPC尚未设计完整剧情线。</p></div>{% endif %}
+
+        <div class="events-section"><h4>📜 事件日志</h4>
+            <div class="event-list">{% for e in events %}
+                <div class="event-item"><span class="event-time">{{ e.created_at[:16] }}</span><span class="event-type">{{ e.event_type }}</span><span class="event-desc">{{ e.description }}</span></div>{% else %}<div class="event-empty">暂无</div>{% endfor %}</div></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let pendingLock=null;
+function setLock(s){if(s==='锁定'){pendingLock='锁定';document.getElementById('lock-player-row').style.display='flex';document.getElementById('lock-player-input').focus();}else{apiPost('/api/npc/{{npc.id}}/lock',{lock_status:s,player_name:''}).then(()=>location.reload());}}
+function confirmLock(){const n=document.getElementById('lock-player-input').value.trim();if(!n){showToast('请输入玩家姓名','error');return;}apiPost('/api/npc/{{npc.id}}/lock',{lock_status:'锁定',player_name:n}).then(()=>location.reload());}
+function setNpcStatus(s){apiPost('/api/npc/{{npc.id}}/status',{status:s}).then(()=>location.reload());}
+function editLocation(){const l=document.getElementById('loc-display');const c=l.textContent==='—'?'':l.textContent;const i=prompt('新位置：',c);if(i!==null&&i.trim()){apiPost('/api/npc/{{npc.id}}/location',{location:i.trim()}).then(()=>location.reload());}}
+function saveNote(){apiPost('/api/npc/{{npc.id}}/note',{notes:document.getElementById('note-textarea').value});}
+function rollbackNode(id){if(!confirm('确认回退？'))return;apiPost('/api/npc/'+id+'/rollback',{}).then(()=>location.reload());}
+function copyScene(){const s=document.getElementById('scene-text');const o=document.querySelectorAll('.option-item');let t=s.textContent.trim()+'\n\n--- 选项 ---\n';o.forEach((x,i)=>{t+='\n'+x.querySelector('.option-key').textContent+'. '+x.querySelector('.option-text').textContent;});navigator.clipboard.writeText(t).then(()=>showToast('已复制','success'));}
+function chooseOption(k){document.querySelectorAll('.btn-option').forEach(b=>b.disabled=true);showToast('提交中…','info');apiPost('/api/npc/{{npc.id}}/choose_option',{option_key:k}).then(d=>{document.getElementById('result-option').textContent=d.option_key+'. '+d.option_text;document.getElementById('result-text').textContent=d.result_text;document.getElementById('result-gain').textContent=d.player_gain||'(无)';document.getElementById('result-panel').style.display='block';document.getElementById('result-panel').scrollIntoView({behavior:'smooth',block:'start'});showToast('节点完成: '+d.node_title,'success');}).catch(()=>{document.querySelectorAll('.btn-option').forEach(b=>b.disabled=false);});}
+function copyResult(){const o=document.getElementById('result-option').textContent;const r=document.getElementById('result-text').textContent;const g=document.getElementById('result-gain').textContent;let t='所选: '+o+'\n\n--- 结果 ---\n'+r;if(g&&g!=='(无)')t+='\n\n玩家获得: '+g;navigator.clipboard.writeText(t).then(()=>showToast('已复制','success'));}
+</script>
+{% endblock %}

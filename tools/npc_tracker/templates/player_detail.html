@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}{{ player.name }} · 玩家详情{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <a href="/players" class="back-link">← 玩家面板</a>
+    <h1>{{ player.name }}</h1>
+</div>
+
+<div class="detail-grid">
+    <div class="detail-card">
+        <h3>基本信息</h3>
+        <div class="info-table">
+            <div class="info-row"><span class="info-label">位置</span><span id="loc-display">{{ player.current_location or '—' }}</span><button class="btn-sm" onclick="editField('location','current_location')">✏️</button></div>
+            <div class="info-row"><span class="info-label">金币</span><span id="gold-display">💰 {{ player.gold }}</span><button class="btn-sm" onclick="editField('gold','gold')">✏️</button></div>
+            <div class="info-row"><span class="info-label">状态</span><span>{{ {'active':'在线','inactive':'离线','dead':'死亡'}.get(player.status,'?') }}</span></div>
+            <div class="info-row"><span class="info-label">创建时间</span><span>{{ player.created_at[:16] }}</span></div>
+        </div>
+
+        {% if player.aspect_levels %}
+        {% set al = player.aspect_levels|string %}
+        {% set al = al[1:-1] if al.startswith('{') else al %}
+        <div class="control-group"><h4>📊 性相等级</h4>
+            <div class="aspect-levels">{{ al }}</div></div>
+        {% endif %}
+
+        <div class="control-group"><h4>🎒 物品栏</h4>
+            <div id="inventory-display" class="inventory-text">{{ player.inventory or '(空)' }}</div>
+            <button class="btn-sm" onclick="editField('inventory','inventory')" style="margin-top:4px;">编辑</button></div>
+
+        <div class="control-group"><h4>📝 笔记</h4>
+            <textarea id="note-area" rows="3">{{ player.notes or '' }}</textarea>
+            <button class="btn btn-sm" onclick="saveNote()" style="margin-top:4px;">保存</button></div>
+
+        {% if player.locked_npcs %}
+        <div class="control-group"><h4>🔒 锁定的NPC</h4>
+            <div class="connection-list">{% for n in player.locked_npcs %}
+                <a href="/npc/{{ n.id }}" class="connection-item"><span class="conn-name">{{ n.name }}</span>
+                <span class="conn-rel">节点 {{ n.current_node }}</span></a>{% endfor %}</div></div>
+        {% endif %}
+    </div>
+
+    <div class="detail-card">
+        <h3>📋 行动日志</h3>
+        <div class="control-group">
+            <h4>记录新行动</h4>
+            <div class="action-form">
+                <div class="form-row"><label>轮次</label><input type="number" id="act-round" value="1" style="width:60px;"></div>
+                <div class="form-row"><label>类型</label><select id="act-type"><option>探索</option><option>移动</option><option>社交</option><option>攻击</option><option>仪式</option><option>其他</option></select></div>
+                <div class="form-row"><label>行动</label><input type="text" id="act-text" placeholder="玩家提交的行动内容"></div>
+                <div class="form-row"><label>结果</label><input type="text" id="act-result" placeholder="法官裁定的结果"></div>
+                <div class="form-row"><label>涉及NPC</label><input type="text" id="act-npc" placeholder="NPC名称（可选）"></div>
+                <button class="btn" onclick="logAction()">记录</button>
+            </div>
+        </div>
+
+        <div class="event-list" style="max-height:500px;overflow-y:auto;">
+            {% for a in actions %}
+            <div class="event-item">
+                <span class="event-time">{{ a.created_at[:16] }}</span>
+                <span class="event-type">R{{ a.round_number }} {{ a.action_type }}</span>
+                <span class="event-desc">{{ a.action_text[:60] }}{% if a.action_text|length>60 %}…{% endif %}</span>
+                {% if a.npc_name %}<span class="event-npc">{{ a.npc_name }}</span>{% endif %}
+            </div>
+            {% else %}<div class="event-empty">暂无行动记录</div>{% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function editField(label, field) {
+    const cur = field==='gold' ? document.getElementById('gold-display').textContent.replace('💰 ','') : '';
+    const val = prompt('新'+label+'：', cur);
+    if (val === null) return;
+    const data = {}; data[field] = val;
+    fetch('/api/player/{{ player.id }}', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+        .then(r=>r.json()).then(d=>{if(d.ok)location.reload();else showToast(d.error,'error');});
+}
+function saveNote() {
+    fetch('/api/player/{{ player.id }}', {method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({notes:document.getElementById('note-area').value})})
+        .then(r=>r.json()).then(d=>{if(d.ok)showToast('已保存','success');});
+}
+function logAction() {
+    const data = {
+        round_number: parseInt(document.getElementById('act-round').value)||1,
+        action_type: document.getElementById('act-type').value,
+        action_text: document.getElementById('act-text').value,
+        result_text: document.getElementById('act-result').value,
+        location: document.getElementById('loc-display').textContent,
+    };
+    const npcName = document.getElementById('act-npc').value.trim();
+    if (npcName) data.npc_id = 0; // placeholder — would need name lookup
+    if (!data.action_text) { showToast('请输入行动内容','error'); return; }
+    fetch('/api/player/{{ player.id }}/action', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})
+        .then(r=>r.json()).then(d=>{if(d.ok){showToast('已记录','success');setTimeout(()=>location.reload(),800);}else showToast(d.error,'error');});
+}
+</script>
+{% endblock %}

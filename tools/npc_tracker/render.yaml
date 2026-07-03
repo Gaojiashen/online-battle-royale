@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: secret-edinburgh-npc
+    env: python
+    buildCommand: pip install -r tools/npc_tracker/requirements.txt
+    startCommand: cd tools/npc_tracker && uvicorn main:app --host 0.0.0.0 --port $PORT
