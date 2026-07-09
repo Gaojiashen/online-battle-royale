@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 logger = logging.getLogger(__name__)
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
 from models import (
     BattleInitRequest, BattleInitResponse,
@@ -77,6 +78,171 @@ async def root():
 @app.get("/health")
 async def health():
     return {"ok": True, "status": "healthy"}
+
+
+@app.get("/judge", response_class=HTMLResponse)
+async def judge_panel():
+    """法官操作面板 — 处理待发起对战"""
+    return HTMLResponse("""
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>法官面板 · 密教模拟器S2</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family: system-ui, sans-serif; background:#1a1a2e; color:#e0d8c0; max-width:700px; margin:40px auto; padding:20px; }
+  h1 { color:#c9a84c; margin-bottom:8px; }
+  .sub { color:#888; font-size:14px; margin-bottom:24px; }
+  .card { background:#222240; border:1px solid #333; border-radius:10px; padding:20px; margin-bottom:16px; }
+  .card h3 { color:#c9a84c; margin-bottom:12px; }
+  .battle-row { display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid #333; }
+  .battle-row:last-child { border-bottom:none; }
+  .battle-row .vs { color:#888; font-weight:bold; }
+  .battle-row .player { font-weight:600; font-size:16px; }
+  .btn { padding:8px 20px; border:none; border-radius:6px; font-size:14px; font-weight:600; cursor:pointer; }
+  .btn-go { background:#c9a84c; color:#1a1a2e; }
+  .btn-go:hover { background:#dab95d; }
+  .btn-go:disabled { background:#555; color:#888; cursor:not-allowed; }
+  .result { margin-top:12px; padding:12px; border-radius:6px; font-size:14px; display:none; }
+  .result.ok { background:rgba(76,175,80,0.2); border:1px solid #4CAF50; display:block; }
+  .result.err { background:rgba(244,67,54,0.2); border:1px solid #F44336; display:block; }
+  .empty { color:#666; text-align:center; padding:20px; }
+  .loading { color:#888; }
+</style>
+</head>
+<body>
+<h1>法官面板</h1>
+<p class="sub">密教模拟器S2 — 战斗发起中心</p>
+
+<div class="card">
+  <h3>待发起的对战</h3>
+  <div id="pending"></div>
+  <div id="result"></div>
+</div>
+
+<div class="card">
+  <h3>快速手动发起</h3>
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+    <input id="pa" placeholder="玩家A名称" style="padding:8px;background:#333;border:1px solid #555;color:#e0d8c0;border-radius:6px;">
+    <span class="vs">VS</span>
+    <input id="pb" placeholder="玩家B名称" style="padding:8px;background:#333;border:1px solid #555;color:#e0d8c0;border-radius:6px;">
+    <button class="btn btn-go" onclick="manualStart()">发起对战</button>
+  </div>
+</div>
+
+<script>
+const BASE = 'CB6XbtkLaafJnYsDL8RcHFpEnDg';
+const API = '/api/battle/init-from-base';
+
+async function loadPending() {
+  const div = document.getElementById('pending');
+  div.innerHTML = '<span class="loading">加载中...</span>';
+  try {
+    const resp = await fetch('/api/judge/pending');
+    const data = await resp.json();
+    if (!data.records || data.records.length === 0) {
+      div.innerHTML = '<div class="empty">没有待发起的对战<br><small>在飞书Base「法官面板」新建一条记录吧</small></div>';
+      return;
+    }
+    div.innerHTML = data.records.map(r =>
+      `<div class="battle-row">
+        <span class="player">${r.player_a||'?'}</span>
+        <span class="vs">VS</span>
+        <span class="player">${r.player_b||'?'}</span>
+        <button class="btn btn-go" onclick="triggerBattle('${r.record_id}','${r.player_a}','${r.player_b}')">发起对战</button>
+      </div>`
+    ).join('');
+  } catch(e) {
+    div.innerHTML = '<div class="empty">加载失败: '+e.message+'</div>';
+  }
+}
+
+async function triggerBattle(recordId, nameA, nameB) {
+  const result = document.getElementById('result');
+  result.className = 'result';
+  result.style.display = 'block';
+  result.innerHTML = '发起中...';
+  try {
+    const resp = await fetch(API, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({base_token:BASE, player_a_name:nameA, player_b_name:nameB, battle_id:recordId})
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      result.className = 'result ok';
+      result.innerHTML = `对战创建成功！<br>Battle ID: <b>${data.battle_id}</b><br>${nameA}: ${data.player_a_available_count}张可用 · ${nameB}: ${data.player_b_available_count}张可用`;
+      loadPending();
+    } else {
+      result.className = 'result err';
+      result.innerHTML = '失败: '+JSON.stringify(data);
+    }
+  } catch(e) {
+    result.className = 'result err';
+    result.innerHTML = '错误: '+e.message;
+  }
+}
+
+async function manualStart() {
+  const a = document.getElementById('pa').value.trim();
+  const b = document.getElementById('pb').value.trim();
+  if (!a || !b) { alert('请填写两个玩家名称'); return; }
+  const result = document.getElementById('result');
+  result.className = 'result';
+  result.style.display = 'block';
+  result.innerHTML = '发起中...';
+  try {
+    const resp = await fetch(API, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({base_token:BASE, player_a_name:a, player_b_name:b, battle_id:''})
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      result.className = 'result ok';
+      result.innerHTML = `对战创建成功！<br>Battle ID: <b>${data.battle_id}</b><br>${a}: ${data.player_a_available_count}张 · ${b}: ${data.player_b_available_count}张`;
+    } else {
+      result.className = 'result err';
+      result.innerHTML = '失败: '+JSON.stringify(data);
+    }
+  } catch(e) {
+    result.className = 'result err';
+    result.innerHTML = '错误: '+e.message;
+  }
+}
+
+loadPending();
+</script>
+</body>
+</html>
+""")
+
+
+@app.get("/api/judge/pending")
+async def judge_pending():
+    """读取法官面板中待发起的记录"""
+    try:
+        records = await feishu_client.list_records(
+            "CB6XbtkLaafJnYsDL8RcHFpEnDg", "tblbheflCQ2wTgml"
+        )
+        pending = []
+        for r in records:
+            fields = r.get("fields", {})
+            status = fields.get("状态", "")
+            # 处理单选字段返回数组的情况
+            if isinstance(status, list):
+                status = status[0] if status else ""
+            if status == "待发起":
+                pending.append({
+                    "record_id": r.get("record_id", ""),
+                    "player_a": fields.get("玩家A", ""),
+                    "player_b": fields.get("玩家B", ""),
+                })
+        return {"ok": True, "records": pending}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.post("/api/battle/init", response_model=BattleInitResponse)
