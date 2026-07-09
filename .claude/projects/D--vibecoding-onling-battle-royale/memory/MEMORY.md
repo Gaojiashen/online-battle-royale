@@ -1,6 +1,0 @@
-- [Game Concept](game-concept.md) — 游戏核心概念和定位
-- [Communication Restriction](communication-restriction.md) — 玩家间无自由交流渠道
-- [Action Framework V1](action-framework-v1.md) — 9个核心动词和三阶段裁定流程
-- [Project Vibe](project-vibe.md) — 项目风格偏好和设计哲学
-- [Next Steps](next-steps.md) — 当前进度和下一步可选方向
-- [Progress 2026-06-24](进度-2026-06-24.md) — V2流式结算+28区地图+第一个NPC+世界观
