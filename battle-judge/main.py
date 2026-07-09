@@ -1,15 +1,12 @@
 """
 密教模拟器S2 战斗裁判 — FastAPI 入口
-部署于飞书妙搭 (Spark/Miaoda)
+部署于 Render.com
 """
 import os
 import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-
-# 确保当前目录在 path 中
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from models import (
     BattleInitRequest, BattleInitResponse,
