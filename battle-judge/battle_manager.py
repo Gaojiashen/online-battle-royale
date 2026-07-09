@@ -2,6 +2,7 @@
 对战生命周期管理 — 创建/状态/结算/记录
 """
 import uuid
+import logging
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 
@@ -15,6 +16,9 @@ from models import (
     WebhookResponse, RoundLog,
     BattleStatusResponse, PlayerStateInfo, BattleHistoryResponse,
 )
+from base_sync import base_sync
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -86,6 +90,16 @@ class BattleManager:
 
         self._battles[battle_id] = session
 
+        # 异步同步到飞书Base（不阻塞响应）
+        import asyncio
+        asyncio.create_task(base_sync.sync_battle_init(
+            battle_id=battle_id,
+            player_a_name=req.player_a_name,
+            player_b_name=req.player_b_name,
+            player_a_aspects=req.player_a_aspects,
+            player_b_aspects=req.player_b_aspects,
+        ))
+
         return BattleInitResponse(
             battle_id=battle_id,
             player_a_available=[_card_to_info(c) for c in a_available],
@@ -139,6 +153,10 @@ class BattleManager:
         session.current_round = 1
         session.state = "in_progress"
 
+        # 异步同步到飞书Base
+        import asyncio
+        asyncio.create_task(base_sync.sync_battle_started(battle_id=req.battle_id))
+
         return DeckConfirmResponse(
             battle_id=req.battle_id,
             state="in_progress",
@@ -163,10 +181,18 @@ class BattleManager:
                                    message=f"卡牌 {card_id} 不在本场牌库中")
 
         # 存储提交
+        player_name = session.player_a_name if side == "a" else session.player_b_name
         if side == "a":
             session.submission_a = card_id
         else:
             session.submission_b = card_id
+
+        # 异步同步提交到飞书Base
+        import asyncio
+        asyncio.create_task(base_sync.sync_submission_made(
+            battle_id=battle_id, side=side,
+            player_name=player_name, card_id=card_id,
+        ))
 
         # 检查双方是否都提交了
         if session.submission_a and session.submission_b:
@@ -206,6 +232,37 @@ class BattleManager:
                 session.end_reason = result.end_reason
             else:
                 session.current_round += 1
+
+            # 异步同步回合结果到飞书Base
+            import asyncio
+            state_a_dict = {
+                "hp": state_a.hp, "edge": state_a.edge,
+                "phantom": state_a.phantom, "charge": state_a.charge,
+                "chill": state_a.self_chill, "pulse": state_a.pulse,
+                "read": state_a.read, "insight": state_a.insight,
+            } if state_a else None
+            state_b_dict = {
+                "hp": state_b.hp, "edge": state_b.edge,
+                "phantom": state_b.phantom, "charge": state_b.charge,
+                "chill": state_b.self_chill, "pulse": state_b.pulse,
+                "read": state_b.read, "insight": state_b.insight,
+            } if state_b else None
+            asyncio.create_task(base_sync.sync_round_result(
+                battle_id=session.id,
+                round_number=result.round_number,
+                card_a_name=f"{result.card_a.id} {result.card_a.name}",
+                card_b_name=f"{result.card_b.id} {result.card_b.name}",
+                rps_description=result.rps_description,
+                damage_to_a=result.damage_to_a,
+                damage_to_b=result.damage_to_b,
+                hp_a_after=state_a.hp if state_a else 0,
+                hp_b_after=state_b.hp if state_b else 0,
+                special_events=list(result.special_events),
+                winner=result.winner,
+                battle_ended=result.battle_ended,
+                state_a=state_a_dict,
+                state_b=state_b_dict,
+            ))
 
             return WebhookResponse(
                 battle_id=session.id,
