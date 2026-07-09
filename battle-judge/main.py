@@ -301,25 +301,49 @@ async def battle_init_from_base(req: InitFromBaseRequest):
     )
     result = await battle_manager.init_battle(init_req)
 
-    # 3. 写入可用牌到Base
+    # 3. 同步写入 Base（带错误报告）
+    write_errors = []
+
+    # 写入对战管理 + 玩家战斗状态
+    try:
+        await base_sync.sync_battle_init(
+            battle_id=result.battle_id,
+            player_a_name=req.player_a_name,
+            player_b_name=req.player_b_name,
+            player_a_aspects=player_a_aspects,
+            player_b_aspects=player_b_aspects,
+        )
+    except Exception as e:
+        write_errors.append(f"对战管理/玩家状态写入失败: {e}")
+
+    # 写入可用牌
     a_cards = [{"id": c.id, "name": c.name, "category": c.category, "aspect": c.aspect}
                for c in get_available_cards(player_a_aspects)]
     b_cards = [{"id": c.id, "name": c.name, "category": c.category, "aspect": c.aspect}
                for c in get_available_cards(player_b_aspects)]
 
-    import asyncio
-    asyncio.create_task(base_sync.sync_available_cards(
-        battle_id=result.battle_id, side="A",
-        player_name=req.player_a_name, cards=a_cards,
-    ))
-    asyncio.create_task(base_sync.sync_available_cards(
-        battle_id=result.battle_id, side="B",
-        player_name=req.player_b_name, cards=b_cards,
-    ))
+    try:
+        await base_sync.sync_available_cards(
+            battle_id=result.battle_id, side="A",
+            player_name=req.player_a_name, cards=a_cards,
+        )
+    except Exception as e:
+        write_errors.append(f"A可用牌写入失败: {e}")
 
-    # 4. 更新法官面板的记录，写入对战ID
+    try:
+        await base_sync.sync_available_cards(
+            battle_id=result.battle_id, side="B",
+            player_name=req.player_b_name, cards=b_cards,
+        )
+    except Exception as e:
+        write_errors.append(f"B可用牌写入失败: {e}")
+
+    # 4. 更新法官面板
     if req.battle_id:
-        asyncio.create_task(_update_judge_panel(req.base_token, req.battle_id, result.battle_id))
+        try:
+            await _update_judge_panel(req.base_token, req.battle_id, result.battle_id)
+        except Exception as e:
+            write_errors.append(f"法官面板更新失败: {e}")
 
     return {
         "ok": True,
@@ -330,6 +354,7 @@ async def battle_init_from_base(req: InitFromBaseRequest):
         "player_b_aspects": player_b_aspects,
         "player_a_available_count": len(a_cards),
         "player_b_available_count": len(b_cards),
+        "write_errors": write_errors if write_errors else None,
     }
 
 

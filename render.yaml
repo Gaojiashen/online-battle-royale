@@ -1,11 +1,5 @@
 services:
   - type: web
-    name: secret-edinburgh-npc
-    env: python
-    buildCommand: pip install -r tools/requirements.txt && pip install -r battle-judge/battle-judge-spark/requirements.txt
-    startCommand: cd tools/npc_tracker && uvicorn main:app --host 0.0.0.0 --port $PORT
-
-  - type: web
     name: secret-edinburgh-judge
     env: python
     buildCommand: pip install -r battle-judge/requirements.txt

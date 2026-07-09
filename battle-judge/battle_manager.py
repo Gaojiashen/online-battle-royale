@@ -89,17 +89,7 @@ class BattleManager:
         )
 
         self._battles[battle_id] = session
-
-        # 异步同步到飞书Base（不阻塞响应）
-        import asyncio
-        asyncio.create_task(base_sync.sync_battle_init(
-            battle_id=battle_id,
-            player_a_name=req.player_a_name,
-            player_b_name=req.player_b_name,
-            player_a_aspects=req.player_a_aspects,
-            player_b_aspects=req.player_b_aspects,
-        ))
-
+        # Base同步由调用方（init-from-base）处理
         return BattleInitResponse(
             battle_id=battle_id,
             player_a_available=[_card_to_info(c) for c in a_available],
