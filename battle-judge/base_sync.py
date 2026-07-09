@@ -19,10 +19,11 @@ logger = logging.getLogger(__name__)
 BASE_TOKEN = os.environ.get("FEISHU_BASE_TOKEN", "CB6XbtkLaafJnYsDL8RcHFpEnDg")
 
 # 表ID
-TABLE_BATTLE = "tblWciOhRlFFEaSr"       # 对战管理
-TABLE_PLAYER_STATE = "tblTNAkesS7WlJoR"  # 玩家战斗状态
-TABLE_BATTLE_LOG = "tblyUL90LNC1Snb5"    # 对战记录
-TABLE_SUBMISSION = "tblcmGlzO76H3RQt"    # 回合提交
+TABLE_BATTLE = "tblWciOhRlFFEaSr"          # 对战管理
+TABLE_PLAYER_STATE = "tblTNAkesS7WlJoR"     # 玩家战斗状态
+TABLE_BATTLE_LOG = "tblyUL90LNC1Snb5"       # 对战记录
+TABLE_SUBMISSION = "tblcmGlzO76H3RQt"       # 回合提交
+TABLE_AVAILABLE_CARDS = "tbl0DDzK6ckrqQah"  # 玩家可用牌
 
 
 class BaseSync:
@@ -251,6 +252,79 @@ class BaseSync:
             return
         await self._set_submitted_flag(battle_id, "A", False)
         await self._set_submitted_flag(battle_id, "B", False)
+
+    async def sync_available_cards(
+        self,
+        battle_id: str,
+        side: str,
+        player_name: str,
+        cards: List[Dict[str, str]],
+    ):
+        """写入玩家可用牌列表"""
+        if not self.enabled:
+            return
+        try:
+            for c in cards:
+                await feishu_client.add_record(
+                    self.base_token,
+                    TABLE_AVAILABLE_CARDS,
+                    {
+                        "对战ID": battle_id,
+                        "玩家侧": side,
+                        "卡牌ID": c["id"],
+                        "卡牌名称": c["name"],
+                        "类别": c["category"],
+                        "性相": c["aspect"],
+                    },
+                )
+            logger.info(f"Base同步: {player_name}({side}) 可用牌 {len(cards)} 张已写入")
+        except Exception as e:
+            logger.error(f"Base同步失败 (available_cards): {e}")
+
+    async def sync_deck_confirmed(
+        self,
+        battle_id: str,
+        side: str,
+        deck: List[str],
+    ):
+        """将选定的8张牌写入玩家战斗状态的牌位1-8，并标记已确认"""
+        if not self.enabled:
+            return
+        try:
+            records = await feishu_client.list_records(
+                self.base_token, TABLE_PLAYER_STATE
+            )
+            for r in records:
+                fields = r.get("fields", {})
+                if fields.get("对战ID") == battle_id and fields.get("玩家侧") == side:
+                    update = {"牌库已确认": True}
+                    for i, card_id in enumerate(deck[:8], 1):
+                        update[f"牌位{i}"] = card_id
+                    await feishu_client.update_record(
+                        self.base_token, TABLE_PLAYER_STATE, r["record_id"], update
+                    )
+                    logger.info(f"Base同步: {side} 牌库已确认 {deck}")
+                    return
+        except Exception as e:
+            logger.error(f"Base同步失败 (deck_confirm): {e}")
+
+    async def check_both_decks_confirmed(self, battle_id: str) -> bool:
+        """检查双方是否都确认了牌库"""
+        if not self.enabled:
+            return True  # 如果没有Base同步，默认通过
+        try:
+            records = await feishu_client.list_records(
+                self.base_token, TABLE_PLAYER_STATE
+            )
+            confirmed = []
+            for r in records:
+                fields = r.get("fields", {})
+                if fields.get("对战ID") == battle_id:
+                    confirmed.append(fields.get("牌库已确认", False))
+            return len(confirmed) >= 2 and all(confirmed[:2])
+        except Exception as e:
+            logger.error(f"Base同步失败 (check_decks): {e}")
+            return False
 
 
 # 全局单例

@@ -26,6 +26,21 @@ class DeckConfirmRequest(BaseModel):
     player_b_deck: List[str] = Field(..., min_length=8, max_length=8, description="B的8张牌ID")
 
 
+class InitFromBaseRequest(BaseModel):
+    """从Base面板发起对战请求（只需玩家名，API自动查性相等级）"""
+    base_token: str = Field(..., description="Base token")
+    player_a_name: str = Field(..., description="玩家A名称")
+    player_b_name: str = Field(..., description="玩家B名称")
+    battle_id: str = Field(default="", description="对战ID（workflow传record_id）")
+
+
+class ConfirmFromBaseRequest(BaseModel):
+    """从Base确认牌库请求"""
+    base_token: str = Field(..., description="Base token")
+    battle_id: str = Field(..., description="对战ID")
+    side: str = Field(..., description="玩家侧: a/b")
+
+
 class WebhookPayload(BaseModel):
     """Base自动化webhook载荷"""
     event: str = Field(default="card_submitted", description="事件类型")
