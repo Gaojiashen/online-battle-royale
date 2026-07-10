@@ -1,0 +1,12 @@
+- [World Setting](world-setting.md) — 核心世界观：隐秘爱丁堡（唐纳王朝73年、六性相、权力格局、飞升体系）
+- [NPC Design](npc-design.md) — NPC设计规范与已完成NPC清单（6个）
+- [Isobel Storyline](isonbel-storyline.md) — 伊索贝尔·格雷28天剧情线（选择支结构、三终局）
+- [Interaction Philosophy](interaction-philosophy.md) — 交互设计原则：选择支驱动，非自由对话
+- [Project Structure](project-structure.md) — 项目文件结构（Phase 2：src/judge/模块化，2026-07-10）
+- [NPC Management Tool](npc-management-tool.md) — NPC剧情线管理工具（FastAPI Web应用）架构与功能
+- [Player Panel](player-panel.md) — 玩家面板已废弃（2026-07-09），功能迁移至飞书Base + src/judge/
+- [Combat System](combat-system.md) — 战斗系统V6：48张卡牌、六性相独占资源、RPS同时结算、无先后手（2026-07-10）
+- [Ascension Rules](ascension-rules.md) — 六性相飞升规则：各性相关键仪式、所需物品、仪式地点、飞升奖励与世界影响
+- [Item & Search Tables](item-search-tables.md) — 搜索道具表：物品六分类、28区搜索池、探索掷骰机制、密传合成规则
+- [Narrative Discussion 2026-07-08](narrative-discussion-2026-07-08.md) — 主线剧情讨论进度：异常化节奏提案、辉蛾之茧设计、4个待确认问题
+- [Feishu Upload Preference](feishu-upload-preference.md) — 飞书上传偏好：xlsx默认转为多维表格，项目文件夹为密教模拟器S2
