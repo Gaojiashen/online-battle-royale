@@ -389,8 +389,16 @@ async def _get_player_state_record(battle_id: str, side: str) -> Optional[dict]:
 
 
 async def _find_player_battle(name: str) -> Optional[dict]:
-    """在玩家战斗状态表中查找玩家当前的战斗"""
+    """在玩家战斗状态表中查找玩家当前活跃的战斗（优先非结束状态）"""
     records = await feishu_client.list_records(BASE_TOKEN, TABLE_PLAYER_STATE)
+    for r in records:
+        if r.get("fields", {}).get("玩家名称") == name:
+            # 检查对应对战是否已结束
+            bid = r["fields"].get("对战ID", "")
+            battle = await _get_battle_record(bid)
+            if battle and battle["fields"].get("状态", "") not in ("已结束", ""):
+                return r
+    # 兜底：如果没有活跃对战，返回最近一条（已结束也能查看）
     for r in records:
         if r.get("fields", {}).get("玩家名称") == name:
             return r
