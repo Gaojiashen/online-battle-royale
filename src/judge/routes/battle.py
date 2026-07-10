@@ -70,7 +70,7 @@ async def battle_init_from_base(req: InitFromBaseRequest, request: Request):
     # 1. 从Base查性相
     try:
         player_records = await feishu_client.list_records(
-            req.base_token, "tbl1NnOpplq3x7Rg"
+            req.base_token, "tbl4KaRcfiz1pZq1"
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"读取玩家表失败: {e}")
@@ -79,7 +79,7 @@ async def battle_init_from_base(req: InitFromBaseRequest, request: Request):
     aspects_b = {}
     for r in player_records:
         fields = r.get("fields", {})
-        name = fields.get("名称", "")
+        name = fields.get("玩家名称", "")
         if name == req.player_a_name:
             aspects_a = {
                 k: int(v) for k, v in fields.items()
@@ -112,8 +112,17 @@ async def battle_init_from_base(req: InitFromBaseRequest, request: Request):
 
     # 3. 写入Base
     try:
-        await base_sync.sync_battle_init(result.battle_id, req, result,
-                                          aspects_a, aspects_b)
+        await base_sync.sync_battle_init(result.battle_id, req.player_a_name,
+                                          req.player_b_name, aspects_a, aspects_b)
+        # 写入双方可用卡牌
+        a_cards = [{"id": c.id, "name": c.name, "category": c.category,
+                     "aspect": c.aspect} for c in result.player_a_available]
+        b_cards = [{"id": c.id, "name": c.name, "category": c.category,
+                     "aspect": c.aspect} for c in result.player_b_available]
+        await base_sync.sync_available_cards(
+            result.battle_id, "A", req.player_a_name, a_cards)
+        await base_sync.sync_available_cards(
+            result.battle_id, "B", req.player_b_name, b_cards)
     except Exception as e:
         logger.error(f"Base同步失败(非阻塞): {e}")
 

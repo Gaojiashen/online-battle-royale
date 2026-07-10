@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>战斗仪表盘 · 密教模拟器S2</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family: system-ui, sans-serif; background:#1a1a2e; color:#e0d8c0; max-width:700px; margin:40px auto; padding:20px; }
+  h1 { color:#c9a84c; margin-bottom:4px; font-size:24px; }
+  .sub { color:#888; font-size:14px; margin-bottom:20px; }
+  .card { background:#222240; border:1px solid #333; border-radius:10px; padding:20px; margin-bottom:14px; }
+  .card h3 { color:#c9a84c; margin-bottom:12px; font-size:16px; }
+  .hidden { display:none !important; }
+
+  /* Entry */
+  .entry-box { text-align:center; padding:40px 20px; }
+  .entry-box input { padding:12px 16px; font-size:16px; background:#333; border:1px solid #555; color:#e0d8c0; border-radius:8px; width:240px; margin-bottom:16px; display:block; margin-left:auto; margin-right:auto; }
+  .entry-box .err { color:#F44336; font-size:14px; margin-top:8px; }
+
+  /* Buttons */
+  .btn { padding:10px 24px; border:none; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
+  .btn-go { background:#c9a84c; color:#1a1a2e; }
+  .btn-go:hover { background:#dab95d; }
+  .btn-go:disabled { background:#555; color:#888; cursor:not-allowed; }
+  .btn-sm { padding:6px 14px; font-size:13px; }
+  .btn-outline { background:transparent; border:1px solid #555; color:#e0d8c0; }
+  .btn-outline:hover { background:#333; }
+
+  /* Battle status */
+  .hp-bar-row { display:flex; align-items:center; gap:12px; margin-bottom:8px; }
+  .hp-bar-row .name { font-weight:600; min-width:60px; }
+  .hp-bar-outer { flex:1; height:20px; background:#333; border-radius:4px; overflow:hidden; }
+  .hp-bar-inner { height:100%; border-radius:4px; transition:width .4s; }
+  .hp-bar-inner.green { background:#4CAF50; }
+  .hp-bar-inner.yellow { background:#FF9800; }
+  .hp-bar-inner.red { background:#F44336; }
+  .hp-text { font-size:13px; min-width:50px; text-align:right; }
+
+  .vs-divider { text-align:center; color:#888; font-weight:bold; margin:4px 0 12px; }
+  .resources { display:flex; flex-wrap:wrap; gap:6px 16px; font-size:13px; color:#aaa; }
+  .resources span { font-family:monospace; }
+
+  /* Card selection */
+  .card-list { max-height:320px; overflow-y:auto; }
+  .card-row { display:flex; align-items:center; gap:10px; padding:8px 10px; border-bottom:1px solid #2a2a44; cursor:pointer; border-radius:4px; }
+  .card-row:hover { background:#2a2a44; }
+  .card-row.selected { background:rgba(201,168,76,0.15); border-color:#c9a84c; }
+  .card-row .check { width:18px; height:18px; border:2px solid #555; border-radius:4px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:12px; }
+  .card-row.selected .check { border-color:#c9a84c; background:#c9a84c; color:#1a1a2e; }
+  .card-row .cinfo { flex:1; }
+  .card-row .cname { font-weight:600; }
+  .card-row .cdetail { font-size:12px; color:#888; }
+
+  /* Card submit */
+  .card-select { padding:10px 12px; font-size:15px; background:#333; border:1px solid #555; color:#e0d8c0; border-radius:8px; width:100%; margin-bottom:12px; }
+  .waiting-msg { color:#FF9800; font-size:13px; margin-top:8px; }
+
+  /* Logs */
+  .log-entry { padding:8px 0; border-bottom:1px solid #2a2a44; font-size:13px; }
+  .log-entry .lrnd { color:#c9a84c; font-weight:600; }
+  .log-entry .lsep { color:#555; margin:0 6px; }
+
+  /* Result */
+  .result-msg { text-align:center; padding:20px; }
+  .result-msg .big { font-size:28px; margin-bottom:8px; }
+  .result-msg.win { color:#4CAF50; }
+  .result-msg.lose { color:#F44336; }
+  .result-msg.draw { color:#FF9800; }
+
+  /* Errors */
+  .error-bar { background:rgba(244,67,54,0.15); border:1px solid #F44336; padding:10px 16px; border-radius:6px; color:#F44336; font-size:14px; margin-bottom:14px; }
+  .info-bar { background:rgba(33,150,243,0.15); border:1px solid #2196F3; padding:10px 16px; border-radius:6px; color:#90CAF9; font-size:14px; margin-bottom:14px; }
+
+  .footer { text-align:right; font-size:12px; color:#555; margin-top:16px; }
+  .footer button { margin-left:12px; }
+</style>
+</head>
+<body>
+
+<!-- ========== Entry ========== -->
+<div id="section-entry" class="card entry-box">
+  <h1>&#9876; 战斗仪表盘</h1>
+  <p class="sub">密教模拟器S2</p>
+  <input id="input-name" type="text" placeholder="输入你的玩家名称" autofocus>
+  <button class="btn btn-go" onclick="enterBattle()">进入战斗</button>
+  <div id="entry-err" class="err hidden"></div>
+</div>
+
+<!-- ========== Error bar ========== -->
+<div id="error-bar" class="error-bar hidden"></div>
+
+<!-- ========== Battle (shared) ========== -->
+<div id="section-battle" class="hidden">
+
+  <!-- Status -->
+  <div id="battle-status" class="card">
+    <h3 id="status-title">&#9876; 战斗仪表盘</h3>
+    <div id="status-body"></div>
+    <div class="resources" id="my-resources"></div>
+  </div>
+
+  <!-- Deck selection -->
+  <div id="battle-deck" class="card hidden">
+    <h3>我的可用卡牌</h3>
+    <div class="card-list" id="card-list"></div>
+    <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;">
+      <span id="deck-count" style="color:#888;">已选择：0 / 8</span>
+      <button class="btn btn-go" id="btn-confirm-deck" disabled onclick="confirmDeck()">确认牌库</button>
+    </div>
+  </div>
+
+  <!-- Card submit -->
+  <div id="battle-submit" class="card hidden">
+    <h3>本回合出牌</h3>
+    <select class="card-select" id="card-select"></select>
+    <button class="btn btn-go" id="btn-submit-card" onclick="submitCard()">提交出牌</button>
+    <div id="waiting-msg" class="waiting-msg hidden"></div>
+  </div>
+
+  <!-- Battle end -->
+  <div id="battle-end" class="card hidden"></div>
+
+  <!-- Logs -->
+  <div id="battle-logs" class="card hidden">
+    <h3>战斗记录</h3>
+    <div id="logs-body"></div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <span id="last-update"></span>
+    <button class="btn btn-sm btn-outline" onclick="refreshAll()">刷新</button>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════
+// State
+// ═══════════════════════════════════════
+let playerName = '';
+let battleId = '';
+let mySide = '';
+let currentState = '';
+let pollTimer = null;
+
+function showError(msg) {
+  const el = document.getElementById('error-bar');
+  el.textContent = msg; el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 6000);
+}
+
+function now() { return new Date().toLocaleTimeString(); }
+
+// ═══════════════════════════════════════
+// Entry
+// ═══════════════════════════════════════
+async function enterBattle() {
+  const name = document.getElementById('input-name').value.trim();
+  if (!name) return;
+  playerName = name;
+
+  const resp = await fetch(`/api/player/lookup?name=${encodeURIComponent(name)}`);
+  const data = await resp.json();
+  if (!data.ok) {
+    document.getElementById('entry-err').textContent = data.message || '未找到玩家';
+    document.getElementById('entry-err').classList.remove('hidden');
+    return;
+  }
+  if (!data.has_battle) {
+    document.getElementById('entry-err').textContent = '暂无进行中的战斗，等法官发起后再来';
+    document.getElementById('entry-err').classList.remove('hidden');
+    return;
+  }
+  battleId = data.battle_id;
+  document.getElementById('section-entry').classList.add('hidden');
+  document.getElementById('section-battle').classList.remove('hidden');
+  await refreshAll();
+}
+
+// ═══════════════════════════════════════
+// Refresh
+// ═══════════════════════════════════════
+async function refreshAll() {
+  try {
+    const resp = await fetch(`/api/player/${encodeURIComponent(playerName)}/battle`);
+    if (!resp.ok) { showError('获取战斗状态失败'); return; }
+    const data = await resp.json();
+    currentState = data.state;
+    mySide = data.my_side;
+    document.getElementById('status-title').textContent = `⚔ ${playerName} 的 战斗仪表盘`;
+    renderBattleStatus(data);
+    document.getElementById('last-update').textContent = now();
+
+    // Show/hide sections based on state
+    const inDeckPhase = (data.state === '已初始化' || data.state === '选牌中') && !data.deck_locked;
+    const inBattle = data.state === '对战中';
+    const finished = data.state === '已结束';
+
+    document.getElementById('battle-deck').classList.toggle('hidden', !inDeckPhase);
+    document.getElementById('battle-submit').classList.toggle('hidden', !inBattle);
+    document.getElementById('battle-end').classList.toggle('hidden', !finished);
+    document.getElementById('battle-logs').classList.toggle('hidden', !inBattle && !finished);
+
+    if (inDeckPhase) await loadAvailableCards();
+    if (inBattle) await loadBattleSubmit(data);
+    if (finished) renderEndScreen(data);
+    if (inBattle || finished) await loadBattleLogs();
+
+    // Auto-polling
+    stopPolling();
+    if (inDeckPhase && data.deck_confirmed && !data.deck_locked) {
+      startPolling(3000); // waiting for opponent to confirm
+    } else if (inBattle && data.my_submitted_this_round) {
+      startPolling(5000); // waiting for opponent to submit
+    } else if (inDeckPhase && !data.deck_confirmed) {
+      // Player hasn't confirmed yet, no auto-poll
+    }
+  } catch(e) {
+    showError('刷新失败: ' + e.message);
+  }
+}
+
+function startPolling(ms) {
+  stopPolling();
+  pollTimer = setInterval(refreshAll, ms);
+}
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+// ═══════════════════════════════════════
+// Battle status UI
+// ═══════════════════════════════════════
+function hpColor(hp) {
+  if (hp > 12) return 'green';
+  if (hp > 6) return 'yellow';
+  return 'red';
+}
+function renderBattleStatus(data) {
+  let html = '';
+  html += renderHPBar(playerName, data.my_hp);
+  html += '<div class="vs-divider">VS</div>';
+  html += renderHPBar(data.opponent_name, data.opponent_hp);
+  html += `<div style="text-align:center;margin-top:8px;color:#888;">当前回合：${data.current_round} · 状态：${data.state}</div>`;
+  document.getElementById('status-body').innerHTML = html;
+
+  const r = data.my_resources || {};
+  document.getElementById('my-resources').innerHTML =
+    `锋芒:${r.edge||0} 幻影:${r.phantom||0} 蓄力:${r.charge||0} 寒意:${r.chill||0} 脉动:${r.pulse||0} 洞悉:${r.read||0} 看破:${r.insight||0}`;
+}
+function renderHPBar(name, hp) {
+  return `<div class="hp-bar-row">
+    <span class="name">${name||'?'}</span>
+    <div class="hp-bar-outer"><div class="hp-bar-inner ${hpColor(hp)}" style="width:${hp/20*100}%"></div></div>
+    <span class="hp-text">${hp} / 20</span>
+  </div>`;
+}
+
+// ═══════════════════════════════════════
+// Deck selection
+// ═══════════════════════════════════════
+let selectedCards = [];
+async function loadAvailableCards() {
+  const resp = await fetch(`/api/player/${encodeURIComponent(playerName)}/available-cards`);
+  const data = await resp.json();
+  selectedCards = data.cards.filter(c => c.selected).map(c => c.card_id);
+  document.getElementById('deck-count').textContent = `已选择：${selectedCards.length} / 8`;
+  updateConfirmBtn();
+
+  document.getElementById('card-list').innerHTML = data.cards.map(c => {
+    const sel = selectedCards.includes(c.card_id);
+    return `<div class="card-row${sel?' selected':''}" onclick="toggleCard('${c.card_id}',this)" data-cid="${c.card_id}">
+      <div class="check">${sel?'✓':''}</div>
+      <div class="cinfo">
+        <div class="cname">${c.name}</div>
+        <div class="cdetail">${c.category} · ${c.aspect} · ${c.effect_text||''}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+function toggleCard(cid, el) {
+  const idx = selectedCards.indexOf(cid);
+  if (idx >= 0) { selectedCards.splice(idx, 1); el.classList.remove('selected'); el.querySelector('.check').textContent = ''; }
+  else if (selectedCards.length < 8) { selectedCards.push(cid); el.classList.add('selected'); el.querySelector('.check').textContent = '✓'; }
+  document.getElementById('deck-count').textContent = `已选择：${selectedCards.length} / 8`;
+  updateConfirmBtn();
+}
+function updateConfirmBtn() {
+  document.getElementById('btn-confirm-deck').disabled = (selectedCards.length !== 8);
+}
+async function confirmDeck() {
+  if (selectedCards.length !== 8) return;
+  const resp = await fetch('/api/player/select-deck', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({player_name:playerName, battle_id:battleId, card_ids:selectedCards})
+  });
+  const data = await resp.json();
+  if (!data.ok) { showError(data.message || '确认失败'); return; }
+  if (data.status === 'waiting_for_opponent') {
+    document.getElementById('btn-confirm-deck').disabled = true;
+    document.getElementById('btn-confirm-deck').textContent = '等待对手确认中...';
+    startPolling(3000);
+  } else {
+    stopPolling();
+    await refreshAll();
+  }
+}
+
+// ═══════════════════════════════════════
+// Card submit
+// ═══════════════════════════════════════
+async function loadBattleSubmit(data) {
+  const deck = data.my_deck || [];
+  const sel = document.getElementById('card-select');
+  sel.innerHTML = deck.map(cid => `<option value="${cid}">${cid}</option>`).join('');
+
+  if (data.my_submitted_this_round) {
+    sel.disabled = true;
+    document.getElementById('btn-submit-card').disabled = true;
+    document.getElementById('waiting-msg').classList.remove('hidden');
+    document.getElementById('waiting-msg').textContent = '⏳ 本回合已提交，等待对手中...';
+  } else {
+    sel.disabled = false;
+    document.getElementById('btn-submit-card').disabled = false;
+    document.getElementById('waiting-msg').classList.add('hidden');
+  }
+}
+async function submitCard() {
+  const cardId = document.getElementById('card-select').value;
+  if (!cardId) return;
+  const resp = await fetch('/api/player/submit-card', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({player_name:playerName, battle_id:battleId, round_number:0, card_id:cardId})
+  });
+  const data = await resp.json();
+  if (!data.ok) { showError(data.detail || data.message || '提交失败'); return; }
+  if (data.status === 'waiting_for_opponent') {
+    document.getElementById('card-select').disabled = true;
+    document.getElementById('btn-submit-card').disabled = true;
+    document.getElementById('waiting-msg').classList.remove('hidden');
+    document.getElementById('waiting-msg').textContent = '⏳ 已提交，等待对手中...';
+    startPolling(5000);
+  } else {
+    await refreshAll();
+  }
+}
+
+// ═══════════════════════════════════════
+// End screen
+// ═══════════════════════════════════════
+function renderEndScreen(data) {
+  const w = data.winner;
+  let cls = 'draw', emoji = '🤝', txt = '平局！';
+  if (w === playerName || (mySide === 'A' && w === 'a') || (mySide === 'B' && w === 'b')) {
+    cls = 'win'; emoji = '🏆'; txt = `${playerName} 获胜！`;
+  } else if (w && w !== 'draw') {
+    cls = 'lose'; emoji = '💀'; txt = `${data.opponent_name} 获胜！`;
+  }
+  document.getElementById('battle-end').innerHTML =
+    `<div class="result-msg ${cls}"><div class="big">${emoji} ${txt}</div></div>` +
+    renderHPBar(playerName, data.my_hp) + '<div class="vs-divider">VS</div>' + renderHPBar(data.opponent_name||'对手', data.opponent_hp) +
+    `<div style="text-align:center;margin-top:8px;color:#888;">总回合数：${data.current_round}</div>`;
+}
+
+// ═══════════════════════════════════════
+// Battle logs
+// ═══════════════════════════════════════
+async function loadBattleLogs() {
+  const resp = await fetch(`/api/player/${encodeURIComponent(playerName)}/battle-logs`);
+  const data = await resp.json();
+  if (!data.logs || data.logs.length === 0) {
+    document.getElementById('logs-body').innerHTML = '<div style="color:#666;">暂无记录</div>';
+    return;
+  }
+  document.getElementById('logs-body').innerHTML = data.logs.map(l =>
+    `<div class="log-entry">
+      <span class="lrnd">R${l.round}</span>
+      <span class="lsep">|</span>
+      ${l.my_card||'?'} vs ${l.opponent_card||'?'}
+      <span class="lsep">|</span>
+      ${l.rps_description||''}
+    </div>`
+  ).join('');
+}
+</script>
+</body>
+</html>

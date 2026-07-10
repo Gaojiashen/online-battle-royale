@@ -59,9 +59,11 @@ def create_app() -> FastAPI:
     # 注册路由
     from routes.battle import router as battle_router
     from routes.judge_panel import router as judge_router
+    from routes.player_client import router as player_router
 
     app.include_router(battle_router)
     app.include_router(judge_router)
+    app.include_router(player_router)
 
     return app
 

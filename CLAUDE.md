@@ -1,13 +1,266 @@
-# CLAUDE.md
+# CLAUDE.md — 密教模拟器S2 战斗裁判开发规则
 
-## Memory 存储位置
+> 本文档是 Claude 在本项目中的**开发规则**，不是业务介绍。
+> 修改代码前必须遵循本文档。
 
-本项目的记忆文件存储在项目内的 `.claude/memory/` 目录中，**不使用** C 盘用户目录下的 memory 存储。
+---
 
-## 上下文恢复
+## 1. 项目核心原则
 
-每次运行时，读取 `.claude/memory/MEMORY.md` 索引文件，并按需加载 `.claude/memory/` 中的相关记忆文件来恢复项目上下文。
+### 1.1 项目边界
 
-## 项目概述
+代码模块边界：
 
-密教模拟器S2 — 在线大逃杀游戏。核心模块：战斗裁判引擎（`src/judge/`），部署于 Render.com。
+当前 src/judge/ 战斗裁判引擎不负责实现：
+- 世界模拟代码
+- NPC系统代码
+- 探索系统代码
+- 飞升系统代码
+- 物品管理代码
+- 玩家账户系统代码
+
+以上属于游戏设计层或其他服务模块，不应在本模块中实现。
+
+注意：
+这些系统仍属于《密教模拟器 S2》整体游戏设计范围。
+当进行剧情、美术、规则设计讨论时，不受此代码边界限制。
+
+### 1.2 部署单元 = `src/judge/`
+
+本项目部署于 Render.com 的只是 `src/judge/` 目录。该目录之外的文件（`docs/`、`scripts/`、`.claude/`）不会部署到生产环境。
+
+### 1.3 分层架构
+
+```
+routes/        ← 只处理 HTTP：解析请求、调用下层、返回响应
+  ↓
+engine/        ← 纯逻辑：无HTTP依赖、无飞书依赖、可独立测试
+  ↓
+integration/   ← 外部服务：飞书API调用、Base同步
+models/        ← 数据定义：Pydantic请求/响应模型
+```
+
+**各层职责严格分离。禁止跨层调用（如 engine 直接调 feishu_client）。**
+
+### 1.4 战斗引擎是纯逻辑
+
+`engine/` 下的所有模块接受 Python 对象作为输入，返回 Python 对象作为输出。不依赖 FastAPI、HTTP、飞书。不读取环境变量。不发起网络请求。
+
+### 1.5 状态存储在内存
+
+所有对战状态存储在 `BattleManager._battles: Dict[str, BattleSession]`。无数据库、无文件持久化。服务重启后状态全部丢失。
+
+---
+
+## 2. 禁止事项
+
+### 2.0 飞书 Base 是当前阶段的数据管理与交互平台
+
+- 当前阶段，飞书 Base 承担数据管理和轻量交互角色。
+- 玩家通过 Base 表格完成：查看可用卡牌、选择8张牌库、逐回合提交出牌、查看战斗状态与历史记录。
+- 法官通过 `/judge` Dashboard 页面 + Base「法官面板」表发起对战。
+- 飞书 Workflow 是 Base 和本服务之间的桥梁：监听 Base 记录变更 → HTTP POST 到本服务 → 本服务结算后写回 Base。
+- **不作为长期玩家客户端架构约束**。未来可以增加独立的 Player Client（Web/App），通过调用本服务 API 替代 Base + Workflow 链路，不违反当前架构。
+- **设计原则**：业务逻辑在本服务，自动化在 Workflow，数据/交互在 Base。三者各司其职，不在 Workflow 中写业务逻辑，不在本服务中做UI渲染。
+
+### 2.1 禁止无理由修改目录结构
+
+- `src/judge/` 的子目录布局（`engine/`, `routes/`, `integration/`, `models/`, `templates/`, `tests/`）是经过设计的架构分层。
+- **禁止无理由修改**：新增/删除/重命名子目录必须说明原因并与用户讨论确认后方可进行。
+- 新增模块优先放入已有目录；若确实需要新目录，先说明理由。
+- 不得在 `src/judge/` 外创建与部署相关的代码。
+
+### 2.2 禁止重复实现已有功能
+
+修改前必须先搜索是否有已有实现：
+- 卡牌相关 → 查 `card_library.py`
+- 战斗结算 → 查 `rps_resolver.py`
+- Base读写 → 查 `feishu_client.py`
+- Base同步 → 查 `base_sync.py`
+
+### 2.3 禁止删除已有API端点
+
+`routes/battle.py` 中的 7 个端点 + `routes/judge_panel.py` 的 2 个端点 + `app.py` 的 2 个基础端点都不可删除。新增端点可以，但不能改变已有端点的路径或方法。
+
+### 2.4 禁止在 Workflow 中实现业务逻辑
+
+飞书 Workflow 只负责触发 webhook。所有战斗逻辑（选牌校验、RPS结算、资源计算、胜负判定）必须在 `src/judge/` 中实现。
+
+### 2.5 禁止把业务逻辑写进 routes
+
+Routes 方法不超过 15 行（不含 docstring）。核心逻辑必须放在 `engine/` 或 `integration/` 中。
+
+### 2.6 禁止硬编码新配置
+
+飞书 Base Token、表ID 等配置项，**新加的**必须从环境变量读取并提供默认值。不能直接在代码中写死新的外部依赖标识符。（已有硬编码的 Base token 和表ID 暂时保留。）
+
+### 2.7 禁止在 engine 中引入异步
+
+`engine/` 层不使用 `async/await`。它只做同步计算。异步操作（如 Base 同步）由 `battle_manager.py` 或 routes 层通过 `asyncio.create_task()` 触发。
+
+### 2.8 禁止无关重构
+
+- 修改代码时，只修改与当前任务直接相关的部分。
+- **禁止**在修复 bug 时顺手重构无关模块。
+- **禁止**在添加功能时顺便调整已有代码风格（除非该风格违反本规则）。
+- **禁止**大规模重命名或移动文件，除非该重命名是当前任务的明确要求。
+- 如果发现代码中有需要改进的地方但与当前任务无关，先记录下来，向用户报告，获得确认后再单独处理。
+
+---
+
+## 3. 修改代码流程
+
+### 3.1 修改前
+
+1. **分析影响范围**：使用 Grep 搜索被修改函数/类的所有引用
+2. **查找已有实现**：确认是否有重复功能可复用
+3. **说明计划**：向用户报告
+   - 要修改哪些文件
+   - 修改原因
+   - 影响范围
+   - 潜在风险
+
+### 3.2 修改后
+
+1. **汇报修改文件清单**：列出每个被修改的文件及其变更摘要
+2. **运行测试**：
+   ```bash
+   cd src/judge && python -m pytest tests/ -v
+   ```
+   或直接运行：
+   ```bash
+   cd src/judge && python tests/test_battle_scenarios.py
+   ```
+3. **验证卡牌统计**（如果修改了 card_library.py）：
+   ```bash
+   cd src/judge && python -c "from engine.card_library import print_stats; print_stats()"
+   ```
+4. **如测试失败，必须在提交前修复**
+
+---
+
+## 4. 架构约束
+
+### 4.1 Engine 保持纯逻辑
+
+- 输入：Python dataclass 对象
+- 输出：Python dataclass 对象
+- 不依赖 FastAPI / HTTP / 飞书
+- 不使用 `async/await`
+- 不读取环境变量
+- 不发起网络请求
+
+### 4.2 Routes 只处理 HTTP
+
+- 解析请求参数
+- 调用 `app.state.battle_manager` 或 `app.state.webhook_handler`
+- 返回响应
+- 处理异常，转换为 HTTPException
+
+### 4.3 Integration 处理外部服务
+
+- `feishu_client.py`：飞书 OpenAPI 的 HTTP 调用
+- `base_sync.py`：将战斗状态转化为 Base 表格字段并写入。当前覆盖 7 张表（见 ARCHITECTURE.md），同步内容包括：对战初始化、牌库确认、回合提交记录、回合结算结果、玩家资源状态更新、对战结束。
+- Base 同步是**非阻塞的**：所有 `sync_*` 方法通过 `asyncio.create_task()` 异步执行，同步失败仅记录日志，不影响对战流程。
+- 通过 `FEISHU_APP_ID` 环境变量判断是否启用。未配置时所有 `sync_*` 方法静默跳过（`self._enabled = False`）。
+
+### 4.4 Models 只定义数据结构
+
+- 使用 Pydantic BaseModel
+- 不包含业务逻辑
+- requests.py 和 responses.py 分离
+
+### 4.5 BattleManager 管理生命周期
+
+- 维护内存中的对战状态字典 `_battles: Dict[str, BattleSession]`
+- 提供对战全生命周期操作：`init_battle()` → `confirm_deck()` → `submit_card()` → `_resolve_round()`
+- 协调 Engine 层（RPSResolver 结算、DeckValidator 校验）和 Integration 层（base_sync 异步写回 Base）
+- 自身不包含结算逻辑（委托给 RPSResolver），不包含资源操作（委托给 ResourceEngine）
+- Base 同步在此层通过 `asyncio.create_task()` 非阻塞触发，确保结算延迟不受 Base 网络影响
+
+---
+
+## 5. Debug 规范
+
+### 5.1 先定位，再修改
+
+当用户报告问题时：
+1. 阅读相关代码
+2. 分析可能的根因
+3. 向用户报告诊断结果
+4. 确认后再修改
+
+**禁止在没有定位根因的情况下直接重构代码。**
+
+### 5.2 测试优先验证
+
+- 修改结算逻辑 → 运行 `rps_resolver.py` 内置测试
+- 修改资源系统 → 运行 `resource_engine.py` 内置测试
+- 修改组牌 → 运行 `deck_validator.py` 内置测试
+- 修改卡牌 → 运行 `test_battle_scenarios.py` 全量
+
+### 5.3 添加日志
+
+生产问题排查依赖日志。关键操作点已有 `logger.info()` 和 `logger.error()`。
+
+新增分支逻辑时，异常路径必须加 `logger.error()`。
+
+---
+
+## 6. 代码风格
+
+### 6.1 匹配现有风格
+
+- 文件头：模块级 docstring 说明模块用途
+- 注释：使用中文
+- 分隔符：`# ═══════...` 用于分段
+- 类型注解：函数签名使用 Python type hints
+- Dataclass：优先使用 `@dataclass`（纯数据）或 Pydantic（API模型）
+
+### 6.2 命名约定
+
+- 文件名：snake_case
+- 类名：PascalCase
+- 函数/变量：snake_case
+- 常量：UPPER_SNAKE_CASE
+
+### 6.3 导入约定
+
+- engine 模块导入 engine 模块使用 `from engine.xxx import ...`（因为运行时工作目录是 src/judge/）
+- routes 和 integration 也用同样方式导入
+- 不要使用相对导入（`from .xxx import ...`）
+
+---
+
+## 7. 关键文件速查
+
+| 文件 | 职责 | 修改时注意 |
+|---|---|---|
+| `app.py` | FastAPI 入口 | 只改 startup/lifespan，不添加业务逻辑 |
+| `engine/card_library.py` | 48张卡牌定义 | 修改卡牌数据必须同步更新测试 |
+| `engine/rps_resolver.py` | RPS结算核心 | 约600行，修改结算逻辑风险最大 |
+| `engine/resource_engine.py` | 6资源流转 | 修改资源规则必须更新内置测试 |
+| `engine/deck_validator.py` | 组牌校验 | DECK_SIZE=8 是常数 |
+| `engine/battle_manager.py` | 对战生命周期 | 状态机：initialized→deck_selection→in_progress→finished |
+| `routes/battle.py` | 对战API | 7个端点，不可删除 |
+| `routes/webhook.py` | Webhook处理 | 薄路由层，委托给 BattleManager |
+| `routes/judge_panel.py` | 法官面板 | 硬编码了 Base token 和表ID |
+| `integration/feishu_client.py` | 飞书API | 全局单例，基于环境变量 |
+| `integration/base_sync.py` | Base同步 | 7张表，非阻塞异步 |
+| `models/requests.py` | 请求模型 | 5个 Pydantic 类 |
+| `models/responses.py` | 响应模型 | 8个 Pydantic 类 |
+| `render.yaml` | 部署配置 | 不要随意修改 buildCommand/startCommand |
+
+## 8.分层规则
+
+routes:
+HTTP入口，只负责请求解析
+
+services:
+业务流程编排
+
+engine:
+纯游戏逻辑
+
+integration:
+外部系统访问
