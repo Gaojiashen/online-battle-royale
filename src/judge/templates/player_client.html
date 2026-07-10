@@ -212,7 +212,7 @@ async function refreshAll() {
     if (inDeckPhase && data.deck_confirmed && !data.deck_locked) {
       startPolling(3000); // waiting for opponent to confirm
     } else if (inBattle && data.my_submitted_this_round) {
-      startPolling(5000); // waiting for opponent to submit
+      startPolling(2000); // waiting for opponent to submit
     } else if (inDeckPhase && !data.deck_confirmed) {
       // Player hasn't confirmed yet, no auto-poll
     }
@@ -340,7 +340,8 @@ async function submitCard() {
     document.getElementById('btn-submit-card').disabled = true;
     document.getElementById('waiting-msg').classList.remove('hidden');
     document.getElementById('waiting-msg').textContent = '⏳ 已提交，等待对手中...';
-    startPolling(5000);
+    await refreshAll();
+    startPolling(2000);
   } else {
     await refreshAll();
   }
