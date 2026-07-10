@@ -12,7 +12,7 @@ V6 六资源：
 
 from dataclasses import dataclass, field
 from typing import Dict, Optional, List
-from card_library import (
+from engine.card_library import (
     Card, CATEGORY_STRIKE, CATEGORY_GUARD, CATEGORY_FEINT,
     CATEGORY_INTERRUPT, CATEGORY_INVOKE
 )
@@ -288,7 +288,7 @@ class ResourceEngine:
 # ════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    from card_library import get_card
+    from engine.card_library import get_card
 
     engine = ResourceEngine()
 

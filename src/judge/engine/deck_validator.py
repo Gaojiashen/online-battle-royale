@@ -9,7 +9,7 @@
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Optional
-from card_library import (
+from engine.card_library import (
     Card, ALL_CARDS, CARDS_BY_ID, get_available_cards,
     ASPECT_BLADE, ASPECT_MOTH, ASPECT_FORGE, ASPECT_WINTER, ASPECT_HEART, ASPECT_LANTERN
 )
@@ -102,7 +102,7 @@ def validate_deck(selected_card_ids: List[str], aspect_levels: Dict[str, int]) -
 
     # 战术建议（warnings，不影响合法性）
     categories = [c.category for c in selected_cards]
-    from card_library import CATEGORY_STRIKE, CATEGORY_GUARD, CATEGORY_FEINT, CATEGORY_INTERRUPT, CATEGORY_INVOKE
+    from engine.card_library import CATEGORY_STRIKE, CATEGORY_GUARD, CATEGORY_FEINT, CATEGORY_INTERRUPT, CATEGORY_INVOKE
 
     strike_count = categories.count(CATEGORY_STRIKE)
     guard_count = categories.count(CATEGORY_GUARD)
@@ -176,7 +176,7 @@ def suggest_deck(aspect_levels: Dict[str, int], strategy: str = "balanced") -> L
     """
     available = calculate_available(aspect_levels)
 
-    from card_library import CATEGORY_STRIKE, CATEGORY_GUARD, CATEGORY_FEINT, CATEGORY_INTERRUPT, CATEGORY_INVOKE
+    from engine.card_library import CATEGORY_STRIKE, CATEGORY_GUARD, CATEGORY_FEINT, CATEGORY_INTERRUPT, CATEGORY_INVOKE
 
     strikes = [c for c in available if c.category == CATEGORY_STRIKE]
     guards = [c for c in available if c.category == CATEGORY_GUARD]

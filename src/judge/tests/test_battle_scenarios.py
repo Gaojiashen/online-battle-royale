@@ -3,15 +3,15 @@
 """
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from card_library import (
+from engine.card_library import (
     ALL_CARDS, CARDS_BY_ID, get_available_cards,
     CATEGORY_STRIKE, CATEGORY_GUARD, CATEGORY_FEINT, CATEGORY_INTERRUPT, CATEGORY_INVOKE,
 )
-from deck_validator import DeckValidationResult, calculate_available, validate_deck, suggest_deck, DECK_SIZE
-from resource_engine import BattleState, ResourceEngine
-from rps_resolver import RPSResolver, RoundResult
+from engine.deck_validator import DeckValidationResult, calculate_available, validate_deck, suggest_deck, DECK_SIZE
+from engine.resource_engine import BattleState, ResourceEngine
+from engine.rps_resolver import RPSResolver, RoundResult
 
 # ═══════════════════════════════════════════════════════════════
 # 工具函数

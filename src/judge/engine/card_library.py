@@ -514,12 +514,4 @@ def print_stats():
           f"Lv15={sum(1 for c in ALL_CARDS if c.level_requirement==15)}")
 
 
-if __name__ == "__main__":
-    print_stats()
-
-    # 示例：灯4+蛾6的可用牌
-    example_levels = {"灯": 4, "蛾": 6}
-    available = get_available_cards(example_levels)
-    print(f"\n示例：灯4+蛾6 → 可用 {len(available)} 张牌:")
-    for c in available:
-        print(f"  {c.id} {c.name} ({c.aspect} {c.level_text})")
+# print_stats() 在 app.py lifespan 中调用

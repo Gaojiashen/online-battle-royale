@@ -4,7 +4,7 @@ Webhook处理器 — 接收Base自动化触发，路由到BattleManager
 import json
 import logging
 from models import WebhookPayload, WebhookResponse
-from battle_manager import BattleManager
+from engine.battle_manager import BattleManager
 
 logger = logging.getLogger(__name__)
 

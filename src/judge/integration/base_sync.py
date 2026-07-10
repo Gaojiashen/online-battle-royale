@@ -8,7 +8,7 @@ import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
-from feishu_client import feishu_client
+from integration.feishu_client import feishu_client
 
 logger = logging.getLogger(__name__)
 

@@ -6,17 +6,17 @@ import logging
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 
-from card_library import Card, CARDS_BY_ID, get_available_cards
-from deck_validator import validate_deck, DECK_SIZE, calculate_available
-from resource_engine import BattleState
-from rps_resolver import RPSResolver, RoundResult
+from engine.card_library import Card, CARDS_BY_ID, get_available_cards
+from engine.deck_validator import validate_deck, DECK_SIZE, calculate_available
+from engine.resource_engine import BattleState
+from engine.rps_resolver import RPSResolver, RoundResult
 from models import (
     BattleInitRequest, BattleInitResponse, CardInfo,
     DeckConfirmRequest, DeckConfirmResponse,
     WebhookResponse, RoundLog,
     BattleStatusResponse, PlayerStateInfo, BattleHistoryResponse,
 )
-from base_sync import base_sync
+from integration.base_sync import base_sync
 
 logger = logging.getLogger(__name__)
 

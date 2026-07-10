@@ -17,11 +17,11 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from copy import deepcopy
 
-from card_library import (
+from engine.card_library import (
     Card, CARDS_BY_ID, get_card,
     CATEGORY_STRIKE, CATEGORY_GUARD, CATEGORY_FEINT, CATEGORY_INTERRUPT, CATEGORY_INVOKE,
 )
-from resource_engine import (
+from engine.resource_engine import (
     BattleState, ResourceEngine,
 )
 
@@ -602,7 +602,7 @@ def get_defense_value(defender: BattleState, attacker_card: Card) -> int:
 # ════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    from card_library import ALL_CARDS
+    from engine.card_library import ALL_CARDS
 
     # 简单对战：通用卡牌测试
     deck = ["C01", "C02", "C03", "C04", "C05", "C06",
