@@ -78,7 +78,7 @@ async def lookup_player(name: str) -> dict:
 # 战斗状态（玩家视角）
 # ════════════════════════════════════════════════════
 
-async def get_player_battle(name: str) -> dict:
+async def get_player_battle(name: str, battle_manager=None) -> dict:
     """获取玩家当前战斗的完整状态（玩家视角）"""
     # 1. 找战斗
     battle = await _find_player_battle(name)
@@ -107,9 +107,10 @@ async def get_player_battle(name: str) -> dict:
     deck_confirmed = _bool_field(my_record, "牌库已确认")
     deck_locked = (state_info["fields"].get("状态", "") not in ("已初始化", "选牌中"))
 
-    # 6. 检查本回合是否已提交
+    # 6. 检查本回合是否已提交 — 优先读内存
     my_submitted = await _has_submitted_this_round(battle_id, side,
-                                                     _int_field(state_info, "当前回合", 0))
+                                                     _int_field(state_info, "当前回合", 0),
+                                                     battle_manager)
 
     return {
         "ok": True,
@@ -437,12 +438,19 @@ async def _get_available_card_ids(battle_id: str, side: str) -> List[str]:
 
 
 async def _has_submitted_this_round(battle_id: str, side: str,
-                                    current_round: int) -> bool:
-    """检查指定侧在当前回合是否已提交"""
+                                    current_round: int, battle_manager=None) -> bool:
+    """检查指定侧在当前回合是否已提交 — 优先读 BattleManager 内存，回退 Base"""
     if current_round == 0:
         return False
-    # 先查 in-memory BattleManager 中的提交状态
-    # 由于 player_service 没有 BattleManager 引用，查 Base
+
+    # 优先查 BattleManager 内存（即时，无 Base 异步写入延迟）
+    if battle_manager is not None:
+        session = battle_manager._battles.get(battle_id)
+        if session is not None:
+            sub = session.submission_a if side.upper() == "A" else session.submission_b
+            return sub is not None
+
+    # Base 回退（服务重启后 session 丢失时）
     records = await feishu_client.list_records(BASE_TOKEN, TABLE_SUBMISSION)
     for r in records:
         fields = r.get("fields", {})
