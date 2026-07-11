@@ -58,6 +58,16 @@ async def player_battle(name: str, request: Request, battle_id: str = ""):
     return result
 
 
+@router.get("/api/player/{name}/battle-full")
+async def player_battle_full(name: str, request: Request, battle_id: str = ""):
+    """聚合接口：一次返回 battle 状态 + 卡牌 + 日志，优先读内存"""
+    bm = request.app.state.battle_manager
+    result = await player_service.get_battle_full(name, bm, battle_id=battle_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail=result.get("message", ""))
+    return result
+
+
 @router.get("/api/player/{name}/available-cards")
 async def player_available_cards(name: str, battle_id: str = ""):
     """获取玩家可用卡牌列表"""

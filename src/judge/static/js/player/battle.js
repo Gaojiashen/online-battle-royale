@@ -5,7 +5,7 @@
 // ═══════════════════════════════════════
 async function refreshAll() {
   try {
-    const resp = await fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/battle?battle_id=${encodeURIComponent(PlayerState.currentBattleId)}`);
+    const resp = await fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/battle-full?battle_id=${encodeURIComponent(PlayerState.currentBattleId)}`);
     if (!resp.ok) { showError('获取战斗状态失败'); return; }
     const data = await resp.json();
     PlayerState.currentState = data.state;
@@ -23,10 +23,10 @@ async function refreshAll() {
     document.getElementById('battle-end').classList.toggle('hidden', !finished);
     document.getElementById('battle-logs').classList.toggle('hidden', !inBattle && !finished);
 
-    if (inDeckPhase) await loadAvailableCards(false);
-    if (inBattle) await loadBattleSubmit(data);
+    if (inDeckPhase) loadAvailableCardsInline(data.cards);
+    if (inBattle) loadBattleSubmit(data);
     if (finished) renderEndScreen(data);
-    if (inBattle || finished) await loadBattleLogs(false);
+    if (inBattle || finished) loadBattleLogsInline(data.logs);
 
     if (inDeckPhase && data.deck_confirmed) {
       document.getElementById('confirmed-deck-area').classList.remove('hidden');
@@ -255,7 +255,47 @@ function renderEndScreen(data) {
 }
 
 // ═══════════════════════════════════════
-// Battle logs
+// Inline renderers (from battle-full aggregated data)
+// ═══════════════════════════════════════
+function loadAvailableCardsInline(cards) {
+  PlayerState.availableCardsData = cards;
+  PlayerState.selectedCards = cards.filter(c => c.selected).map(c => c.card_id);
+  document.getElementById('deck-count').textContent = `已选择：${PlayerState.selectedCards.length} / 8`;
+  updateConfirmBtn();
+  document.getElementById('card-list').innerHTML = cards.map(c => {
+    const sel = PlayerState.selectedCards.includes(c.card_id);
+    return `<div class="card-row${sel?' selected':''}" onclick="toggleCard('${c.card_id}',this)" data-cid="${c.card_id}">
+      <div class="check">${sel?'✓':''}</div>
+      <div class="cinfo">
+        <div class="cname">${c.name}</div>
+        <div class="cdetail">${c.category} · ${c.aspect} · ${c.effect_text||''}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function loadBattleLogsInline(logs) {
+  if (!logs || logs.length === 0) {
+    document.getElementById('logs-body').innerHTML = '<div style="color:#666;">暂无记录</div>';
+    return;
+  }
+  document.getElementById('logs-body').innerHTML = logs.map(l => {
+    const mc = l.my_card || {};
+    const oc = l.opponent_card || {};
+    const myName = mc.card_id ? `${mc.card_id} ${mc.name}` : (mc.name || '?');
+    const oppName = oc.card_id ? `${oc.card_id} ${oc.name}` : (oc.name || '?');
+    return `<div class="log-entry">
+      <span class="lrnd">R${l.round}</span>
+      <span class="lsep">|</span>
+      ${myName} vs ${oppName}
+      <span class="lsep">|</span>
+      ${l.rps_description||''}
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════
+// Battle logs (standalone, for deferred loading)
 // ═══════════════════════════════════════
 async function loadBattleLogs(showLoading = true) {
   if (showLoading) {

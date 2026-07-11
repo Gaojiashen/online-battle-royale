@@ -276,6 +276,178 @@ async def get_player_battle(name: str, battle_manager=None, battle_id: str = "")
 
 
 # ════════════════════════════════════════════════════
+# Battle 聚合接口（内存优先，减少 Base 查询）
+# ════════════════════════════════════════════════════
+
+async def get_battle_full(name: str, battle_manager=None, battle_id: str = "") -> dict:
+    """一次返回前端 refreshAll 需要的全部数据：battle 状态 + 卡牌 + 日志。
+    优先读 BattleSession 内存，session 不存在时从 Base 恢复后读取。"""
+    # 1. 确定 battle_id 和 side
+    if battle_id:
+        battle_rec = await _find_player_in_battle(name, battle_id)
+        if not battle_rec:
+            return {"ok": False, "message": f"玩家 {name} 不在对战 {battle_id} 中"}
+        side = battle_rec["fields"].get("玩家侧", "")
+    else:
+        battle_rec = await _find_player_battle(name)
+        if not battle_rec:
+            return {"ok": False, "message": f"玩家 {name} 没有进行中的战斗"}
+        battle_id = battle_rec["fields"].get("对战ID", "")
+        side = battle_rec["fields"].get("玩家侧", "")
+
+    # 2. 确保 session 存在（内存优先，Base 恢复）
+    if battle_manager is not None and battle_id not in battle_manager._battles:
+        await _restore_session_from_base(battle_id, battle_manager)
+
+    session = battle_manager._battles.get(battle_id) if battle_manager else None
+
+    # 3. 从 Base 获取对手名和状态（始终读 Base 以确保一致，数据量极小）
+    state_info = await _get_battle_record(battle_id)
+    if state_info is None:
+        return {"ok": False, "message": f"对战 {battle_id} 不存在"}
+    opponent = (state_info["fields"].get("玩家B名称", "")
+                if side == "A" else state_info["fields"].get("玩家A名称", ""))
+    state_str = state_info["fields"].get("状态", "")
+    current_round = _int_field(state_info, "当前回合", 0)
+
+    # 4. 从内存读取 HP、资源、提交状态（session 存在时）
+    if session and session.state_a and session.state_b:
+        is_a = (side == "A")
+        my_state = session.state_a if is_a else session.state_b
+        opp_state = session.state_b if is_a else session.state_a
+        my_hp = my_state.hp
+        opp_hp = opp_state.hp
+        my_resources = {
+            "edge": my_state.edge, "phantom": my_state.phantom,
+            "charge": my_state.charge, "chill": my_state.self_chill,
+            "pulse": my_state.pulse, "read": my_state.read,
+            "insight": my_state.insight,
+        }
+        sub = session.submission_a if is_a else session.submission_b
+        my_submitted = sub is not None
+        deck_confirmed = True
+        deck_locked = session.state != "deck_selection"
+        # 使用 session 的 current_round（实时），Base 的可能有延迟
+        current_round = session.current_round
+    else:
+        # Base 回退
+        my_record = await _get_player_state_record(battle_id, side)
+        opp_record = await _get_player_state_record(battle_id, _other_side(side))
+        my_hp = _int_field(my_record, "战HP", 20)
+        opp_hp = _int_field(opp_record, "战HP", 20) if opp_record else 20
+        my_resources = _extract_resources(my_record)
+        my_submitted = await _has_submitted_this_round(battle_id, side, current_round, battle_manager)
+        deck_confirmed = _bool_field(my_record, "牌库已确认")
+        deck_locked = state_str not in ("已初始化", "选牌中")
+
+    # 5. 牌库详情（内存或 Base）
+    if session:
+        my_deck_ids = session.player_a_deck if side == "A" else session.player_b_deck
+        opp_deck_ids = session.player_b_deck if side == "A" else session.player_a_deck
+    else:
+        my_record = await _get_player_state_record(battle_id, side)
+        opp_record = await _get_player_state_record(battle_id, _other_side(side))
+        my_deck_ids = _read_deck_slots(my_record)
+        opp_deck_ids = _read_deck_slots(opp_record)
+    my_deck = _deck_to_detail(my_deck_ids, include_effect=True)
+    opp_deck = _deck_to_detail(opp_deck_ids, include_effect=False)
+
+    # 6. 可用卡牌（内存 session.available 或 Base）
+    if session:
+        avail_ids = session.player_a_available if side == "A" else session.player_b_available
+        cards = [_card_summary(cid, cid in my_deck_ids if deck_locked else False) for cid in avail_ids]
+    else:
+        cards = []
+        records = await feishu_client.list_records(BASE_TOKEN, TABLE_AVAILABLE)
+        for r in records:
+            f = r.get("fields", {})
+            if f.get("对战ID") == battle_id and f.get("玩家侧") == side:
+                cid = f.get("卡牌ID", "")
+                cards.append(_card_summary(cid, cid in my_deck_ids if deck_locked else False))
+
+    # 7. 战斗日志（内存或 Base）
+    logs = []
+    if session and session.rounds:
+        for r in session.rounds:
+            mc = r.card_a if side == "A" else r.card_b
+            oc = r.card_b if side == "A" else r.card_a
+            my_hp_after = r.state_a_after.hp if r.state_a_after else 0
+            opp_hp_after = r.state_b_after.hp if r.state_b_after else 0
+            if side == "B":
+                my_hp_after, opp_hp_after = opp_hp_after, my_hp_after
+            logs.append({
+                "round": r.round_number,
+                "my_card": {"card_id": mc.id, "name": mc.name, "effect_text": mc.effect_text},
+                "opponent_card": {"card_id": oc.id, "name": oc.name, "effect_text": oc.effect_text},
+                "rps_description": r.rps_description,
+                "damage_to_me": r.damage_to_a if side == "A" else r.damage_to_b,
+                "damage_to_opponent": r.damage_to_b if side == "A" else r.damage_to_a,
+                "my_hp_after": my_hp_after, "opponent_hp_after": opp_hp_after,
+                "special_events": r.special_events,
+                "my_resource_logs": r.resource_logs_a if side == "A" else r.resource_logs_b,
+                "opponent_resource_logs": r.resource_logs_b if side == "A" else r.resource_logs_a,
+            })
+    else:
+        log_records = await feishu_client.list_records(BASE_TOKEN, TABLE_BATTLE_LOG)
+        for lr in log_records:
+            f = lr.get("fields", {})
+            if f.get("对战ID") == battle_id:
+                my_card_str = f.get("A使用卡牌" if side == "A" else "B使用卡牌", "")
+                opp_card_str = f.get("B使用卡牌" if side == "A" else "A使用卡牌", "")
+                my_cid = my_card_str.split(" ")[0] if my_card_str else ""
+                opp_cid = opp_card_str.split(" ")[0] if opp_card_str else ""
+                my_card = CARDS_BY_ID.get(my_cid)
+                opp_card = CARDS_BY_ID.get(opp_cid)
+                logs.append({
+                    "round": _int_field(lr, "回合编号", 0),
+                    "my_card": {"card_id": my_cid, "name": my_card.name if my_card else my_card_str, "effect_text": my_card.effect_text if my_card else ""},
+                    "opponent_card": {"card_id": opp_cid, "name": opp_card.name if opp_card else opp_card_str, "effect_text": opp_card.effect_text if opp_card else ""},
+                    "rps_description": f.get("RPS结果描述", ""),
+                    "damage_to_me": _int_field(lr, "A受到伤害" if side == "A" else "B受到伤害", 0),
+                    "damage_to_opponent": _int_field(lr, "B受到伤害" if side == "A" else "A受到伤害", 0),
+                    "my_hp_after": _int_field(lr, "A剩余HP" if side == "A" else "B剩余HP", 20),
+                    "opponent_hp_after": _int_field(lr, "B剩余HP" if side == "A" else "A剩余HP", 20),
+                    "special_events": (f.get("特殊事件", "") or "").split("; "),
+                    "my_resource_logs": [], "opponent_resource_logs": [],
+                })
+    logs.sort(key=lambda x: x["round"])
+
+    return {
+        "ok": True,
+        "battle_id": battle_id,
+        "state": state_str,
+        "current_round": current_round,
+        "my_side": side,
+        "opponent_name": opponent,
+        "my_hp": my_hp,
+        "opponent_hp": opp_hp,
+        "my_resources": my_resources,
+        "my_deck": my_deck,
+        "opponent_deck": opp_deck,
+        "deck_confirmed": deck_confirmed,
+        "deck_locked": deck_locked,
+        "my_submitted_this_round": my_submitted,
+        "winner": state_info["fields"].get("胜者", "") or None,
+        "cards": cards,
+        "logs": logs,
+    }
+
+
+def _card_summary(card_id: str, selected: bool = False) -> dict:
+    """从 CARDS_BY_ID 生成卡牌摘要"""
+    card = CARDS_BY_ID.get(card_id)
+    if card:
+        return {
+            "card_id": card.id, "name": card.name,
+            "category": card.category, "aspect": card.aspect,
+            "level_requirement": card.level_requirement,
+            "effect_text": card.effect_text, "selected": selected,
+        }
+    return {"card_id": card_id, "name": "", "category": "", "aspect": "",
+            "level_requirement": 0, "effect_text": "", "selected": selected}
+
+
+# ════════════════════════════════════════════════════
 # 可用卡牌
 # ════════════════════════════════════════════════════
 
