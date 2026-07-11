@@ -122,6 +122,113 @@ class BattleManager:
         self._battles[battle_id] = session
         logger.info(f"Session 从Base恢复: {battle_id} ({player_a_name} vs {player_b_name})")
 
+    def restore_full_session(
+        self,
+        battle_id: str,
+        battle_record: dict,
+        state_a_record: dict,
+        state_b_record: dict,
+        submission_a_card: Optional[str] = None,
+        submission_b_card: Optional[str] = None,
+    ):
+        """从 Base 数据完整恢复运行中的 BattleSession（服务重启后）"""
+        if battle_id in self._battles:
+            return  # 已存在
+
+        bf = battle_record.get("fields", {})
+        player_a_name = bf.get("玩家A名称", "")
+        player_b_name = bf.get("玩家B名称", "")
+        current_round = int(bf.get("当前回合", 0) or 0)
+        state_str = bf.get("状态", "")
+
+        # 解析性相等级 JSON
+        import json
+        def _parse_aspects(raw):
+            if isinstance(raw, str):
+                try:
+                    return {k: int(v) for k, v in json.loads(raw).items()}
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    pass
+            return {}
+
+        player_a_aspects = _parse_aspects(bf.get("玩家A性相等级", "{}"))
+        player_b_aspects = _parse_aspects(bf.get("玩家B性相等级", "{}"))
+
+        # 从 TABLE_PLAYER_STATE 读牌库 (牌位1-8)
+        def _read_deck(state_record):
+            if not state_record:
+                return []
+            f = state_record.get("fields", {})
+            return [f.get(f"牌位{i}", "") for i in range(1, 9) if f.get(f"牌位{i}")]
+
+        player_a_deck = _read_deck(state_a_record)
+        player_b_deck = _read_deck(state_b_record)
+
+        # 从 TABLE_PLAYER_STATE 读 HP 和资源
+        def _build_state(state_record, aspects):
+            if not state_record:
+                return BattleState(hp=20)
+            f = state_record.get("fields", {})
+            return BattleState(
+                hp=int(f.get("战HP", 20) or 20),
+                blade_level=aspects.get("刃", 0),
+                moth_level=aspects.get("蛾", 0),
+                forge_level=aspects.get("铸", 0),
+                winter_level=aspects.get("冬", 0),
+                heart_level=aspects.get("心", 0),
+                lantern_level=aspects.get("灯", 0),
+                edge=int(f.get("锋芒", 0) or 0),
+                phantom=int(f.get("幻影", 0) or 0),
+                charge=int(f.get("蓄力", 0) or 0),
+                self_chill=int(f.get("寒意", 0) or 0),
+                pulse=int(f.get("脉动", 0) or 0),
+                read=int(f.get("洞悉", 0) or 0),
+                insight=int(f.get("看破", 0) or 0),
+            )
+
+        state_a = _build_state(state_a_record, player_a_aspects)
+        state_b = _build_state(state_b_record, player_b_aspects)
+
+        # 恢复提交状态
+        def _get_submitted(state_record):
+            if not state_record:
+                return False
+            return state_record.get("fields", {}).get("已提交", False) or False
+
+        submission_a = submission_a_card if _get_submitted(state_a_record) else None
+        submission_b = submission_b_card if _get_submitted(state_b_record) else None
+
+        # 重建 session
+        a_available = calculate_available(player_a_aspects)
+        b_available = calculate_available(player_b_aspects)
+
+        session = BattleSession(
+            id=battle_id,
+            player_a_name=player_a_name,
+            player_b_name=player_b_name,
+            player_a_base_token="",
+            player_b_base_token="",
+            player_a_aspects=player_a_aspects,
+            player_b_aspects=player_b_aspects,
+            player_a_available=[c.id for c in a_available],
+            player_b_available=[c.id for c in b_available],
+            player_a_deck=player_a_deck,
+            player_b_deck=player_b_deck,
+            state_a=state_a,
+            state_b=state_b,
+            current_round=current_round,
+            state=state_str if state_str in ("in_progress", "finished") else "in_progress",
+            submission_a=submission_a,
+            submission_b=submission_b,
+            winner=bf.get("胜者", "") or None,
+        )
+
+        if player_a_deck and player_b_deck:
+            session.resolver = RPSResolver(player_a_deck, player_b_deck)
+
+        self._battles[battle_id] = session
+        logger.info(f"Session 完整恢复: {battle_id} r={current_round} {player_a_name}(HP={state_a.hp}) vs {player_b_name}(HP={state_b.hp}) sub_a={submission_a} sub_b={submission_b}")
+
     async def confirm_deck(self, req: DeckConfirmRequest) -> DeckConfirmResponse:
         """确认牌库，开始对战"""
         session = self._battles.get(req.battle_id)
@@ -180,21 +287,21 @@ class BattleManager:
         )
 
     def submit_card(self, battle_id: str, side: str, card_id: str):
-        """玩家提交卡牌 → 返回 (WebhookResponse, Optional[Task])"""
+        """玩家提交卡牌 → 返回 (WebhookResponse, Optional[Task], Optional[Task])"""
         session = self._battles.get(battle_id)
         if not session:
             return WebhookResponse(status="error",
-                                   message=f"对战 {battle_id} 状态丢失（服务可能已重启），请重新发起对战"), None
+                                   message=f"对战 {battle_id} 状态丢失（服务可能已重启），请重新发起对战"), None, None
 
         if session.state != "in_progress":
             return WebhookResponse(battle_id=battle_id, status="error",
-                                   message=f"对战不在进行中: {session.state}"), None
+                                   message=f"对战不在进行中: {session.state}"), None, None
 
         # 校验卡牌在牌库中
         deck = session.player_a_deck if side == "a" else session.player_b_deck
         if card_id not in deck:
             return WebhookResponse(battle_id=battle_id, status="error",
-                                   message=f"卡牌 {card_id} 不在本场牌库中"), None
+                                   message=f"卡牌 {card_id} 不在本场牌库中"), None, None
 
         # 存储提交
         player_name = session.player_a_name if side == "a" else session.player_b_name
@@ -203,16 +310,17 @@ class BattleManager:
         else:
             session.submission_b = card_id
 
-        # 异步同步提交到飞书Base
+        # 提交持久化到 Base（创建 task 供调用方 await）
         import asyncio
-        asyncio.create_task(base_sync.sync_submission_made(
+        submission_task = asyncio.ensure_future(base_sync.sync_submission_made(
             battle_id=battle_id, side=side,
             player_name=player_name, card_id=card_id,
         ))
 
         # 检查双方是否都提交了
         if session.submission_a and session.submission_b:
-            return self._resolve_round(session)
+            response, end_task = self._resolve_round(session)
+            return response, end_task, submission_task
 
         other_side = "b" if side == "a" else "a"
         return WebhookResponse(
@@ -220,7 +328,7 @@ class BattleManager:
             round=session.current_round,
             status="waiting_for_opponent",
             message=f"等待对手({other_side})提交",
-        ), None
+        ), None, submission_task
 
     def _resolve_round(self, session: BattleSession):
         """结算当前回合 → 返回 (WebhookResponse, Optional[Task])"""

@@ -41,11 +41,13 @@ class WebhookHandler:
 
         # 路由到 BattleManager
         try:
-            result, end_sync_task = self.battle_manager.submit_card(
+            result, end_sync_task, submission_task = self.battle_manager.submit_card(
                 battle_id=payload.battle_id,
                 side=payload.player_side,
                 card_id=payload.selected_card,
             )
+            if submission_task is not None:
+                await submission_task
             if end_sync_task is not None:
                 await end_sync_task
             return result

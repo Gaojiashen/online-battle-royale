@@ -144,6 +144,71 @@ async def get_player_battles(name: str) -> dict:
 
 
 # ════════════════════════════════════════════════════
+# Session 恢复辅助
+# ════════════════════════════════════════════════════
+
+async def _restore_session_from_base(battle_id: str, battle_manager) -> bool:
+    """从 Base 读取数据并调用 restore_full_session 恢复 BattleSession。
+    返回 True 表示恢复成功，False 表示数据不足无法恢复。"""
+    try:
+        # 1. 读 TABLE_BATTLE
+        battle_records = await feishu_client.list_records(BASE_TOKEN, TABLE_BATTLE)
+        battle_record = None
+        for r in battle_records:
+            if r.get("fields", {}).get("对战ID") == battle_id:
+                battle_record = r
+                break
+        if not battle_record:
+            logger.warning(f"恢复失败: TABLE_BATTLE 中未找到 {battle_id}")
+            return False
+
+        # 2. 读 TABLE_PLAYER_STATE (A+B)
+        state_records = await feishu_client.list_records(BASE_TOKEN, TABLE_PLAYER_STATE)
+        state_a = None
+        state_b = None
+        for r in state_records:
+            f = r.get("fields", {})
+            if f.get("对战ID") == battle_id:
+                side = f.get("玩家侧", "")
+                if side == "A":
+                    state_a = r
+                elif side == "B":
+                    state_b = r
+        if not state_a or not state_b:
+            logger.warning(f"恢复失败: TABLE_PLAYER_STATE 数据不完整 A={state_a is not None} B={state_b is not None}")
+            return False
+
+        # 3. 读 TABLE_SUBMISSION 找最新提交
+        sub_records = await feishu_client.list_records(BASE_TOKEN, TABLE_SUBMISSION)
+        sub_a = None
+        sub_b = None
+        for r in sub_records:
+            f = r.get("fields", {})
+            if f.get("对战ID") == battle_id:
+                side = f.get("玩家侧", "")
+                card = f.get("选择的卡牌ID", "")
+                if side == "A":
+                    sub_a = card  # 最后一条覆盖
+                elif side == "B":
+                    sub_b = card
+
+        # 4. 调用 BattleManager 恢复
+        battle_manager.restore_full_session(
+            battle_id=battle_id,
+            battle_record=battle_record,
+            state_a_record=state_a,
+            state_b_record=state_b,
+            submission_a_card=sub_a,
+            submission_b_card=sub_b,
+        )
+        logger.info(f"Session {battle_id} 已从 Base 完整恢复")
+        return True
+    except Exception as e:
+        logger.error(f"恢复 Session {battle_id} 失败: {e}")
+        return False
+
+
+# ════════════════════════════════════════════════════
 # 战斗状态（玩家视角）
 # ════════════════════════════════════════════════════
 
@@ -161,6 +226,10 @@ async def get_player_battle(name: str, battle_manager=None, battle_id: str = "")
             return {"ok": False, "message": f"玩家 {name} 没有进行中的战斗"}
         battle_id = battle["fields"].get("对战ID", "")
         side = battle["fields"].get("玩家侧", "")
+
+    # 1.5 如果 Session 丢失（服务重启），尝试从 Base 恢复
+    if battle_manager is not None and battle_id not in battle_manager._battles:
+        await _restore_session_from_base(battle_id, battle_manager)
 
     # 2. 从对战管理查回合/状态/胜者 + 对手名
     state_info = await _get_battle_record(battle_id)
@@ -341,7 +410,7 @@ async def select_deck(player_name: str, battle_id: str,
 def submit_card(battle_id: str, side: str, card_id: str,
                 battle_manager) -> dict:
     """提交本回合出牌 → 直接调 BattleManager"""
-    result, end_sync_task = battle_manager.submit_card(battle_id, side, card_id)
+    result, end_sync_task, submission_task = battle_manager.submit_card(battle_id, side, card_id)
     resp = {}
     if result.status == "resolved" and result.result:
         r = result.result
@@ -366,6 +435,8 @@ def submit_card(battle_id: str, side: str, card_id: str,
         }
     if end_sync_task is not None:
         resp["_end_sync_task"] = end_sync_task
+    if submission_task is not None:
+        resp["_submission_sync_task"] = submission_task
     return resp
 
 
@@ -386,6 +457,10 @@ async def get_battle_logs(name: str, battle_manager=None, battle_id: str = "") -
             return {"ok": False, "message": f"玩家 {name} 没有进行中的战斗"}
         battle_id = battle["fields"].get("对战ID", "")
         side = battle["fields"].get("玩家侧", "")
+
+    # 如果 Session 丢失，尝试从 Base 恢复（使内存路径可用）
+    if battle_manager is not None and battle_id not in battle_manager._battles:
+        await _restore_session_from_base(battle_id, battle_manager)
 
     # 优先读内存（RoundResult 含完整 Card 对象、资源日志、特殊事件）
     if battle_manager is not None:
