@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>战斗仪表盘 · 密教模拟器S2</title>
+<title>密教模拟器S2 · 玩家面板</title>
 <style>
   * { box-sizing:border-box; margin:0; padding:0; }
   body { font-family: system-ui, sans-serif; background:#1a1a2e; color:#e0d8c0; max-width:700px; margin:40px auto; padding:20px; }
@@ -84,6 +84,15 @@
   .badge-draw { background:rgba(255,152,0,0.2); color:#FF9800; }
   .badge-active { background:rgba(33,150,243,0.2); color:#64B5F6; }
 
+  /* Module cards */
+  .module-card { background:#2a2a44; border:1px solid #3a3a55; border-radius:8px; padding:14px 18px; text-align:center; min-width:100px; flex:1; transition:border-color .2s; }
+  .module-card.module-active { border-color:#c9a84c; }
+  .module-card.module-active:hover { border-color:#dab95d; background:#2e2e4a; }
+  .module-card.module-locked { opacity:0.5; cursor:not-allowed; }
+  .module-icon { font-size:24px; margin-bottom:6px; }
+  .module-name { font-weight:600; font-size:14px; color:#e0d8c0; }
+  .module-desc { font-size:11px; color:#888; margin-top:4px; }
+
   .deck-grid { display:flex; flex-wrap:wrap; gap:6px; }
   .deck-card { background:#2a2a44; border:1px solid #3a3a55; border-radius:6px; padding:6px 8px; font-size:12px; min-width:80px; flex:1; max-width:120px; }
   .deck-card .dc-id { color:#888; font-size:10px; }
@@ -99,26 +108,53 @@
 
 <!-- ========== Entry ========== -->
 <div id="section-entry" class="card entry-box">
-  <h1>&#9876; 战斗仪表盘</h1>
-  <p class="sub">密教模拟器S2</p>
+  <h1>&#9876; 密教模拟器S2</h1>
+  <p class="sub">玩家面板</p>
   <input id="input-name" type="text" placeholder="输入你的玩家名称" autofocus>
   <button class="btn btn-go" onclick="enterHome()">进入</button>
   <div id="entry-err" class="err hidden"></div>
 </div>
 
-<!-- ========== Home ========== -->
+<!-- ========== Player Panel ========== -->
 <div id="section-home" class="hidden">
   <div class="card">
     <h3 id="home-title"></h3>
   </div>
+
+  <!-- Module entries -->
   <div class="card">
-    <h3>&#9876; 进行中的战斗</h3>
-    <div id="active-battles"><div style="color:#666;">暂无进行中的战斗</div></div>
+    <h3>功能模块</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;">
+      <div class="module-card module-active" onclick="showBattleList()" style="cursor:pointer;">
+        <div class="module-icon">&#9876;</div>
+        <div class="module-name">战斗</div>
+        <div class="module-desc">当前对战与历史回顾</div>
+      </div>
+      <div class="module-card module-locked">
+        <div class="module-icon">&#127890;</div>
+        <div class="module-name">背包</div>
+        <div class="module-desc">暂未开放</div>
+      </div>
+      <div class="module-card module-locked">
+        <div class="module-icon">&#127942;</div>
+        <div class="module-name">成就</div>
+        <div class="module-desc">暂未开放</div>
+      </div>
+    </div>
   </div>
-  <div class="card">
-    <h3>&#128218; 历史战斗</h3>
-    <div id="finished-battles"><div style="color:#666;">暂无历史战斗</div></div>
+
+  <!-- Battle module content -->
+  <div id="battle-module-content">
+    <div class="card">
+      <h3>&#9876; 进行中的战斗</h3>
+      <div id="active-battles"><div style="color:#666;">暂无进行中的战斗</div></div>
+    </div>
+    <div class="card">
+      <h3>&#128218; 历史战斗</h3>
+      <div id="finished-battles"><div style="color:#666;">暂无历史战斗</div></div>
+    </div>
   </div>
+
   <div class="footer">
     <button class="btn btn-sm btn-outline" onclick="location.reload()">退出</button>
   </div>
@@ -132,7 +168,7 @@
 
   <!-- Status -->
   <div id="battle-status" class="card">
-    <h3 id="status-title">&#9876; 战斗仪表盘</h3>
+    <h3 id="status-title"></h3>
     <div id="status-body"></div>
     <div class="resources" id="my-resources"></div>
   </div>
@@ -256,7 +292,7 @@ async function loadHome() {
 }
 
 function renderHome(data) {
-  document.getElementById('home-title').textContent = `⚔ ${data.player_name} 的战斗主页`;
+  document.getElementById('home-title').textContent = `${data.player_name} 的玩家面板`;
 
   // Active battles
   const active = data.active || [];
@@ -313,6 +349,10 @@ function viewReplay(bid) {
   showError('战斗回顾功能开发中');
 }
 
+function showBattleList() {
+  document.getElementById('battle-module-content').scrollIntoView({behavior:'smooth'});
+}
+
 // ═══════════════════════════════════════
 // Refresh
 // ═══════════════════════════════════════
@@ -323,7 +363,7 @@ async function refreshAll() {
     const data = await resp.json();
     currentState = data.state;
     mySide = data.my_side;
-    document.getElementById('status-title').textContent = `⚔ ${playerName} 的 战斗仪表盘`;
+    document.getElementById('status-title').textContent = `⚔ ${playerName} 的 战场`;
     renderBattleStatus(data);
     document.getElementById('last-update').textContent = now();
 
