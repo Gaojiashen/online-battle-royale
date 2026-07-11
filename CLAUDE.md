@@ -126,6 +126,32 @@ Routes 方法不超过 15 行（不含 docstring）。核心逻辑必须放在 `
 - **禁止**大规模重命名或移动文件，除非该重命名是当前任务的明确要求。
 - 如果发现代码中有需要改进的地方但与当前任务无关，先记录下来，向用户报告，获得确认后再单独处理。
 
+### 2.9 前端按钮交互规范
+
+**所有触发异步操作的按钮必须提供即时反馈**：
+
+| 时机 | 行为 |
+|------|------|
+| 点击瞬间 | `setBtnLoading(btn, 'xxx中...')` — disabled + 文字变更 |
+| 请求成功 | 进入下一状态，按钮保持 disabled 或隐藏 |
+| 请求失败 | `resetBtn(btn)` — 恢复 disabled=false + 原文案 + `showError()` |
+| 异常 | `resetBtn(btn)` + `showError('网络异常，请稍后重试')` + `console.error()` |
+
+**禁止：** 用户点击按钮后无任何视觉反馈，在 `await fetch()` 完成前按钮仍可重复点击。
+
+**统一辅助函数**（已在 `player_client.html` 和 `judge_panel.html` 中定义）：
+```javascript
+function setBtnLoading(btn, text) {
+  btn._origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = text;
+}
+function resetBtn(btn) {
+  btn.disabled = false;
+  if (btn._origText) btn.textContent = btn._origText;
+}
+```
+
 ---
 
 ## 3. 修改代码流程

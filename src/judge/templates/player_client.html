@@ -237,7 +237,7 @@
     <div id="replay-rounds"></div>
   </div>
   <div class="footer">
-    <button class="btn btn-sm btn-outline" onclick="returnToPanel()">← 返回玩家面板</button>
+    <button class="btn btn-sm btn-outline" onclick="returnToPanel(this)">← 返回玩家面板</button>
   </div>
 </div>
 
@@ -444,11 +444,15 @@ function renderReplay(battle, logs) {
   }).join('');
 }
 
-function returnToPanel() {
+async function returnToPanel(btn) {
+  if (btn) setBtnLoading(btn, '返回中...');
   stopPolling();
+  currentBattleId = '';
   document.getElementById('section-replay').classList.add('hidden');
+  document.getElementById('section-battle').classList.add('hidden');
   document.getElementById('section-home').classList.remove('hidden');
-  loadHome();
+  await loadHome();
+  if (btn) resetBtn(btn);
 }
 
 function showBattleList() {
@@ -694,7 +698,10 @@ function renderEndScreen(data) {
   document.getElementById('battle-end').innerHTML =
     `<div class="result-msg ${cls}"><div class="big">${emoji} ${txt}</div></div>` +
     renderHPBar(playerName, data.my_hp) + '<div class="vs-divider">VS</div>' + renderHPBar(data.opponent_name||'对手', data.opponent_hp) +
-    `<div style="text-align:center;margin-top:8px;color:#888;">总回合数：${data.current_round}</div>`;
+    `<div style="text-align:center;margin-top:8px;color:#888;">总回合数：${data.current_round}</div>` +
+    `<div style="text-align:center;margin-top:16px;">
+      <button class="btn btn-go" id="btn-return-panel" onclick="returnToPanel(this)">返回玩家面板</button>
+    </div>`;
 }
 
 // ═══════════════════════════════════════
