@@ -83,40 +83,71 @@
 ```
 
 ---
-### Player Panel（玩家面板 — 2026-07-11 新增）
+### Player Panel（玩家面板 — 2026-07-15 更新）
 
 ```
 ┌─────────────────────────────────────────────────┐
 │           Player Panel（玩家入口页面）             │
 │  /player → player_client.html                   │
 │                                                  │
+│  输入姓名 → section-home（模块卡片）               │
 │  ┌──────────────────────────────────────────┐   │
-│  │  输入姓名 → 进入玩家主页（section-home）    │   │
-│  │                                           │   │
-│  │  ├─ 玩家信息                              │   │
-│  │  ├─ 进行中的战斗 → [进入战斗]               │   │
-│  │  └─ 历史战斗 → [查看回顾]（开发中）          │   │
+│  │  ⚔ 战斗  │  🎒 背包  │  🏆 成就          │   │
+│  │  (活跃)  │  (占位)   │  (占位)           │   │
 │  └──────────────────────────────────────────┘   │
-│                  ↓ 进入战斗                       │
+│         │ 点击 ⚔                                  │
+│         ▼                                        │
+│  section-battle-module（战斗列表）                │
 │  ┌──────────────────────────────────────────┐   │
-│  │  Battle Dashboard（战斗仪表盘）            │   │
-│  │  section-battle                           │   │
-│  │                                           │   │
-│  │  ├─ 选牌阶段（battle-deck）                │   │
-│  │  ├─ 战斗阶段（battle-submit）              │   │
-│  │  ├─ 结束画面（battle-end）                 │   │
-│  │  └─ 战斗记录（battle-logs）                │   │
+│  │  进行中的战斗 → [进入战斗]                 │   │
+│  │  历史战斗     → [查看回顾]                 │   │
 │  └──────────────────────────────────────────┘   │
-│                                                  │
-│  未来扩展：背包、成就、属性面板等 section-*          │
+│         │                    │                   │
+│         ▼                    ▼                   │
+│  section-battle        section-replay            │
+│  (选牌/对战/结束)        (只读回顾)                │
 └─────────────────────────────────────────────────┘
-```
+
+前端 JS 模块结构:
+  static/js/
+    common/ui.js              ← UI.setLoading/clearLoading/showError/showToast
+    player/
+      state.js                ← PlayerState 全局状态对象
+      player_modules.js       ← PlayerModules[] 模块注册表
+      player_panel.js         ← 入口/主页/renderModules/returnToPanel
+      battle_module.js        ← 战斗模块列表
+      battle.js               ← 战斗仪表盘（选牌/出牌/结算）
+      replay.js               ← 战斗回顾
+
+Player Module Registry:
+  所有模块在 player_modules.js 的 PlayerModules 数组中注册。
+  renderModules() 动态生成模块卡片 HTML，onclick 绑定 ModuleManager.open(id, this)。
+  enabled: true  → 可点击，ModuleManager 管理 enter/exit
+  enabled: false → 锁定状态，无点击事件
+  新增模块时只需在数组中添加条目 + 创建对应 JS 文件 + 实现 enter/exit。
+
+Module Lifecycle:
+  ModuleManager.open("battle")
+    ├─ ModuleManager.close(current)   ← 调用旧模块 exit()
+    └─ window[mod.enter](btn)         ← 调用新模块 enter()
+
+Module UI State Flow:
+  enter(btn)
+    ├─ show section
+    ├─ [loading]  LOADING_HTML  ← 立即显示，禁止显示空数据占位
+    ├─ fetch API
+    │   ├─ success + data  → renderData()
+    │   │   ├─ data present → 渲染列表
+    │   │   └─ data empty   → "暂无 XXX"
+    │   └─ error            → ERROR_HTML + showError()
+    └─ UI.clearLoading(btn)
 
 **设计原则：**
-- Player Panel 是玩家进入游戏后的**主入口**，不再是单纯的对战页面
-- Battle Dashboard 是 Player Panel 的**子模块**，通过 `section-battle` 区域承载
-- 当前 `playerName` 是玩家身份标识（全局变量），所有 API 调用基于 `playerName` + `currentBattleId`
-- 未来新模块在 Player Panel 中追加独立的 `section-*`，不应扩展 `section-battle`
+- Player Panel 是玩家进入游戏后的**主入口**，Battle 只是功能模块之一
+- `PlayerState` 对象是唯一共享状态容器，禁止裸全局变量
+- `UI.*` 是统一交互入口，所有按钮必须通过它管理 loading 状态
+- 每个 JS 文件对应一个功能模块，一个 `section-*` HTML 区域
+- 未来新模块：在 `PlayerModules` 注册 + 新建 `static/js/player/<module>.js` + 新建 `section-<module>`，不修改现有文件
 
 ---
 ### 对战完整流程

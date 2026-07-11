@@ -1,15 +1,16 @@
 // battle.js — Battle Dashboard: refresh, deck, submit, end screen, logs
+// 依赖: state.js, common/ui.js
 // ═══════════════════════════════════════
 // Refresh
 // ═══════════════════════════════════════
 async function refreshAll() {
   try {
-    const resp = await fetch(`/api/player/${encodeURIComponent(playerName)}/battle?battle_id=${encodeURIComponent(currentBattleId)}`);
+    const resp = await fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/battle?battle_id=${encodeURIComponent(PlayerState.currentBattleId)}`);
     if (!resp.ok) { showError('获取战斗状态失败'); return; }
     const data = await resp.json();
-    currentState = data.state;
-    mySide = data.my_side;
-    document.getElementById('status-title').textContent = `⚔ ${playerName} 的 战场`;
+    PlayerState.currentState = data.state;
+    PlayerState.mySide = data.my_side;
+    document.getElementById('status-title').textContent = `⚔ ${PlayerState.playerName} 的 战场`;
     renderBattleStatus(data);
     document.getElementById('last-update').textContent = now();
 
@@ -47,10 +48,10 @@ async function refreshAll() {
 
 function startPolling(ms) {
   stopPolling();
-  pollTimer = setInterval(refreshAll, ms);
+  PlayerState.pollTimer = setInterval(refreshAll, ms);
 }
 function stopPolling() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  if (PlayerState.pollTimer) { clearInterval(PlayerState.pollTimer); PlayerState.pollTimer = null; }
 }
 
 // ═══════════════════════════════════════
@@ -63,7 +64,7 @@ function hpColor(hp) {
 }
 function renderBattleStatus(data) {
   let html = '';
-  html += renderHPBar(playerName, data.my_hp);
+  html += renderHPBar(PlayerState.playerName, data.my_hp);
   html += '<div class="vs-divider">VS</div>';
   html += renderHPBar(data.opponent_name, data.opponent_hp);
   html += `<div style="text-align:center;margin-top:8px;color:#888;">当前回合：${data.current_round} · 状态：${data.state}</div>`;
@@ -100,15 +101,15 @@ function renderDeckCards(containerId, cards, showEffect) {
 // Deck selection
 // ═══════════════════════════════════════
 async function loadAvailableCards() {
-  const resp = await fetch(`/api/player/${encodeURIComponent(playerName)}/available-cards?battle_id=${encodeURIComponent(currentBattleId)}`);
+  const resp = await fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/available-cards?battle_id=${encodeURIComponent(PlayerState.currentBattleId)}`);
   const data = await resp.json();
-  availableCardsData = data.cards;
-  selectedCards = data.cards.filter(c => c.selected).map(c => c.card_id);
-  document.getElementById('deck-count').textContent = `已选择：${selectedCards.length} / 8`;
+  PlayerState.availableCardsData = data.cards;
+  PlayerState.selectedCards = data.cards.filter(c => c.selected).map(c => c.card_id);
+  document.getElementById('deck-count').textContent = `已选择：${PlayerState.selectedCards.length} / 8`;
   updateConfirmBtn();
 
   document.getElementById('card-list').innerHTML = data.cards.map(c => {
-    const sel = selectedCards.includes(c.card_id);
+    const sel = PlayerState.selectedCards.includes(c.card_id);
     return `<div class="card-row${sel?' selected':''}" onclick="toggleCard('${c.card_id}',this)" data-cid="${c.card_id}">
       <div class="check">${sel?'✓':''}</div>
       <div class="cinfo">
@@ -119,23 +120,23 @@ async function loadAvailableCards() {
   }).join('');
 }
 function toggleCard(cid, el) {
-  const idx = selectedCards.indexOf(cid);
-  if (idx >= 0) { selectedCards.splice(idx, 1); el.classList.remove('selected'); el.querySelector('.check').textContent = ''; }
-  else if (selectedCards.length < 8) { selectedCards.push(cid); el.classList.add('selected'); el.querySelector('.check').textContent = '✓'; }
-  document.getElementById('deck-count').textContent = `已选择：${selectedCards.length} / 8`;
+  const idx = PlayerState.selectedCards.indexOf(cid);
+  if (idx >= 0) { PlayerState.selectedCards.splice(idx, 1); el.classList.remove('selected'); el.querySelector('.check').textContent = ''; }
+  else if (PlayerState.selectedCards.length < 8) { PlayerState.selectedCards.push(cid); el.classList.add('selected'); el.querySelector('.check').textContent = '✓'; }
+  document.getElementById('deck-count').textContent = `已选择：${PlayerState.selectedCards.length} / 8`;
   updateConfirmBtn();
 }
 function updateConfirmBtn() {
-  document.getElementById('btn-confirm-deck').disabled = (selectedCards.length !== 8);
+  document.getElementById('btn-confirm-deck').disabled = (PlayerState.selectedCards.length !== 8);
 }
 async function confirmDeck() {
-  if (selectedCards.length !== 8) return;
+  if (PlayerState.selectedCards.length !== 8) return;
   const btn = document.getElementById('btn-confirm-deck');
   setBtnLoading(btn, '确认中...');
   try {
     const resp = await fetch('/api/player/select-deck', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({player_name:playerName, battle_id:battleId, card_ids:selectedCards})
+      body: JSON.stringify({player_name: PlayerState.playerName, battle_id: PlayerState.currentBattleId, card_ids: PlayerState.selectedCards})
     });
     const data = await resp.json();
     if (!data.ok) {
@@ -146,7 +147,7 @@ async function confirmDeck() {
     if (data.status === 'waiting_for_opponent') {
       btn.textContent = '等待对手确认中...';
       document.getElementById('confirmed-deck-area').classList.remove('hidden');
-      const myCards = availableCardsData.filter(c => selectedCards.includes(c.card_id));
+      const myCards = PlayerState.availableCardsData.filter(c => PlayerState.selectedCards.includes(c.card_id));
       renderDeckCards('confirmed-deck-list', myCards, true);
       startPolling(3000);
     } else {
@@ -193,7 +194,7 @@ async function submitCard() {
   try {
     const resp = await fetch('/api/player/submit-card', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({player_name:playerName, battle_id:battleId, round_number:0, card_id:cardId})
+      body: JSON.stringify({player_name: PlayerState.playerName, battle_id: PlayerState.currentBattleId, round_number:0, card_id:cardId})
     });
     const data = await resp.json();
     if (!data.ok) {
@@ -225,14 +226,14 @@ async function submitCard() {
 function renderEndScreen(data) {
   const w = data.winner;
   let cls = 'draw', emoji = '🤝', txt = '平局！';
-  if (w === playerName || (mySide === 'A' && w === 'a') || (mySide === 'B' && w === 'b')) {
-    cls = 'win'; emoji = '🏆'; txt = `${playerName} 获胜！`;
+  if (w === PlayerState.playerName || (PlayerState.mySide === 'A' && w === 'a') || (PlayerState.mySide === 'B' && w === 'b')) {
+    cls = 'win'; emoji = '🏆'; txt = `${PlayerState.playerName} 获胜！`;
   } else if (w && w !== 'draw') {
     cls = 'lose'; emoji = '💀'; txt = `${data.opponent_name} 获胜！`;
   }
   document.getElementById('battle-end').innerHTML =
     `<div class="result-msg ${cls}"><div class="big">${emoji} ${txt}</div></div>` +
-    renderHPBar(playerName, data.my_hp) + '<div class="vs-divider">VS</div>' + renderHPBar(data.opponent_name||'对手', data.opponent_hp) +
+    renderHPBar(PlayerState.playerName, data.my_hp) + '<div class="vs-divider">VS</div>' + renderHPBar(data.opponent_name||'对手', data.opponent_hp) +
     `<div style="text-align:center;margin-top:8px;color:#888;">总回合数：${data.current_round}</div>` +
     `<div style="text-align:center;margin-top:16px;">
       <button class="btn btn-go" onclick="returnToPanel(this)">返回玩家面板</button>
@@ -243,7 +244,7 @@ function renderEndScreen(data) {
 // Battle logs
 // ═══════════════════════════════════════
 async function loadBattleLogs() {
-  const resp = await fetch(`/api/player/${encodeURIComponent(playerName)}/battle-logs?battle_id=${encodeURIComponent(currentBattleId)}`);
+  const resp = await fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/battle-logs?battle_id=${encodeURIComponent(PlayerState.currentBattleId)}`);
   const data = await resp.json();
   if (!data.logs || data.logs.length === 0) {
     document.getElementById('logs-body').innerHTML = '<div style="color:#666;">暂无记录</div>';

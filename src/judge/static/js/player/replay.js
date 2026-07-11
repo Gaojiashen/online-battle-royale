@@ -1,9 +1,10 @@
 // replay.js — Battle Replay view
+// 依赖: state.js, common/ui.js
 async function loadReplay(bid) {
   try {
     const [battleResp, logsResp] = await Promise.all([
-      fetch(`/api/player/${encodeURIComponent(playerName)}/battle?battle_id=${encodeURIComponent(bid)}`),
-      fetch(`/api/player/${encodeURIComponent(playerName)}/battle-logs?battle_id=${encodeURIComponent(bid)}`)
+      fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/battle?battle_id=${encodeURIComponent(bid)}`),
+      fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/battle-logs?battle_id=${encodeURIComponent(bid)}`)
     ]);
     const battle = await battleResp.json();
     const logs = await logsResp.json();
@@ -18,7 +19,7 @@ function renderReplay(battle, logs) {
   const state = battle.state || '';
   const winner = battle.winner || '';
   let result = '平局';
-  if (winner === playerName || (battle.my_side === 'A' && winner === 'a') || (battle.my_side === 'B' && winner === 'b')) result = '胜利';
+  if (winner === PlayerState.playerName || (battle.my_side === 'A' && winner === 'a') || (battle.my_side === 'B' && winner === 'b')) result = '胜利';
   else if (winner && winner !== 'draw') result = '失败';
 
   document.getElementById('replay-summary').innerHTML = `

@@ -42,12 +42,120 @@
 
 新增玩家系统模块（背包、成就、属性等）时：
 
-1. **前端隔离**：在 `player_client.html` 中新建 `section-<module>` HTML 区域，通过 `classList.toggle('hidden')` 切换显示
-2. **路由隔离**：新建 `routes/<module>.py`，API 前缀使用 `/api/player/<module>/` 
-3. **业务隔离**：新建 `services/<module>_service.py`，不向 `player_service.py` 追加
-4. **模型隔离**：新建 `models/<module>_requests.py` 和 `models/<module>_responses.py`
-5. **共享状态**：`playerName` 是唯一全局标识符，通过它查找模块数据
-6. **禁止**：不得在 `section-battle`、`battle_service`、`battle_routes` 中追加非战斗功能
+**后端：**
+1. **路由隔离**：新建 `routes/<module>.py`，API 前缀使用 `/api/player/<module>/`
+2. **业务隔离**：新建 `services/<module>_service.py`，不向 `player_service.py` 追加
+3. **模型隔离**：新建 `models/<module>_requests.py` 和 `models/<module>_responses.py`
+4. **共享状态**：`playerName` 是唯一全局标识符，通过它查找模块数据
+5. **禁止**：不得在 `section-battle`、`battle_service`、`battle_routes` 中追加非战斗功能
+
+**前端（JS 模块）：**
+6. **HTML 隔离**：在 `player_client.html` 中新建 `section-<module>` HTML 区域，通过 `classList.toggle('hidden')` 切换显示
+7. **JS 文件独立**：新建 `static/js/player/<module>.js`，一个模块一个文件
+8. **全局状态集中**：`static/js/player/state.js` → `PlayerState` 对象是唯一共享状态。模块之间禁止通过裸全局变量通信
+9. **公共 UI 统一**：`static/js/common/ui.js` → `UI.setLoading()` / `UI.clearLoading()` / `UI.showError()` / `UI.showToast()` 是统一交互入口
+10. **禁止模块间直接访问**：各 JS 文件禁止直接访问其他模块的内部函数（除非通过 `PlayerState` 或 `UI` 公共接口）
+11. **全局包装兼容**：`setBtnLoading` / `resetBtn` / `showError` 保留为全局函数包装（供 HTML onclick 使用），内部委托给 `UI.*`
+
+### 1.4 Player Module Convention（模块注册规范）
+
+**所有玩家功能模块必须在 `player_modules.js` 中注册。**
+
+```javascript
+// player_modules.js — 模块注册表示例
+const PlayerModules = [
+  { id: 'battle', icon: '⚔', name: '战斗', desc: '...', enabled: true, handler: 'enterBattleModule' },
+  { id: 'inventory', icon: '🎒', name: '背包', desc: '暂未开放', enabled: false, handler: null },
+];
+```
+
+**新增模块时必须：**
+1. 在 `PlayerModules` 数组中添加条目（`enabled: false` → 灰度，`enabled: true` → 上线）
+2. 创建对应 JS 文件 `static/js/player/<module>.js`
+3. 在 `player_client.html` 中新建 `section-<module>` HTML 区域
+4. 使用独立 API namespace `/api/player/<module>/*`
+5. 新建 `services/<module>_service.py` 和 `routes/<module>.py`
+6. 模块之间**禁止直接调用**彼此的函数（通过 `PlayerState` 或事件通信）
+7. `renderModules()` 已在 `player_panel.js` 中实现，自动根据注册表渲染模块卡片
+
+### 1.5 Module Lifecycle Convention（模块生命周期规范）
+
+**每个 Player Module 必须提供 `enter()` 和 `exit()` 函数。**
+
+```javascript
+// 注册表中声明：
+{ id: 'battle', enter: 'enterBattleModule', exit: 'exitBattleModule' }
+
+// 对应实现：
+function enterBattleModule(btn) { /* 显示 section，初始化数据 */ }
+function exitBattleModule()     { /* 清理轮询、隐藏 section */ }
+```
+
+**模块切换统一通过 `ModuleManager`：**
+
+```javascript
+ModuleManager.open('battle', this)  // 退出当前模块 → 进入目标模块
+ModuleManager.close('battle')       // 退出指定模块
+ModuleManager.current()             // 返回当前模块 ID
+```
+
+**禁止模块之间直接调用对方的 enter/exit 函数。** 所有模块切换必须通过 `ModuleManager`。
+
+### 1.6 Async Module State Convention（异步模块状态规范）
+
+**所有 Player Module 的 enter 函数必须区分三种异步状态：**
+
+| 状态 | UI 表现 | 触发时机 |
+|------|---------|----------|
+| **loading** | 显示 "加载中..." 或骨架屏 | `fetch` 发起前立即设置 |
+| **success + data** | 渲染实际数据 | `fetch` 成功且有数据 |
+| **success + empty** | 显示 "暂无 XXX" | `fetch` 成功但数据为空 |
+| **error** | 显示 "加载失败，请重试" | `fetch` 异常或 `!data.ok` |
+
+**禁止使用默认空内容（如 "暂无进行中的战斗"）作为加载占位。** 这会让用户在数据加载期间误以为真的没有数据。
+
+**标准模式：**
+```javascript
+async function enterMyModule(btn) {
+  showSection();
+  container.innerHTML = LOADING_HTML;         // 1. 立即显示 loading
+  try {
+    const data = await fetch(...);
+    if (!data.ok) {
+      container.innerHTML = ERROR_HTML;        // 2. 错误状态
+      return;
+    }
+    renderData(data);                          // 3. 成功渲染
+  } catch (e) {
+    container.innerHTML = ERROR_HTML;          // 2. 错误状态
+  }
+}
+```
+
+### 1.7 Card System Convention（卡牌系统约定）
+
+**`card_library.py` 是卡牌数据的唯一定义中心。`CARDS_BY_ID` 是全局注册表。**
+
+**新增普通卡牌时：**
+1. 只需在 `card_library.py` 中添加 `_register(Card(...))`，自动注册到 `CARDS_BY_ID`
+2. Deck 校验、可用牌计算、Replay 显示均自动适配，无需修改其他文件
+3. 优先使用已有的声明式字段表达效果（`is_multi_hit`、`bypasses_defense`、`applies_chill` 等）
+
+**新增特殊效果卡牌时：**
+- **禁止**在 `rps_resolver.py` 或 `resource_engine.py` 中添加 `if card.id == "XXX":` 硬编码
+- **优先**在 `Card` dataclass 中新增语义字段（如 `prevents_death: bool = False`）
+- **优先**在引擎中通过检查字段来触发逻辑（如 `if card.prevents_death:`），而非检查 ID
+- 这使卡牌定义与结算逻辑解耦——未来修改效果只需改 card_library.py
+
+**删除卡牌时：**
+- 从 `ALL_CARDS` 中移除 `_register` 调用即可
+- 运行时安全：`deck_validator`、`player_service`、Replay 均使用 `CARDS_BY_ID.get(id)`（安全返回 None）
+- `rps_resolver.resolve_round` 使用 `get_card(id)`（抛出 KeyError），但仅对当前对战中的卡牌执行，删除卡牌不会出现在新对战中
+- 历史对战 Replay 读 Base 时通过 `CARDS_BY_ID.get(id)` 安全降级
+
+**已知技术债务（暂不处理）：**
+- `rps_resolver.py` 中 27 处 `card.id == "XXX"` 硬编码——等卡牌数量明显增长或特殊机制稳定后统一迁移到声明式字段
+- 当前 48 张卡牌规模下此债务可承受，不影响功能正确性
 
 ### 1.4 分层架构
 

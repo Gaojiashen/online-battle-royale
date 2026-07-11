@@ -128,26 +128,10 @@
     <h3 id="home-title"></h3>
   </div>
 
-  <!-- Module entries -->
+  <!-- Module entries (dynamically rendered by player_modules.js) -->
   <div class="card">
     <h3>功能模块</h3>
-    <div style="display:flex;flex-wrap:wrap;gap:10px;">
-      <div class="module-card module-active" onclick="enterBattleModule()" style="cursor:pointer;">
-        <div class="module-icon">&#9876;</div>
-        <div class="module-name">战斗</div>
-        <div class="module-desc">当前对战与历史回顾</div>
-      </div>
-      <div class="module-card module-locked">
-        <div class="module-icon">&#127890;</div>
-        <div class="module-name">背包</div>
-        <div class="module-desc">暂未开放</div>
-      </div>
-      <div class="module-card module-locked">
-        <div class="module-icon">&#127942;</div>
-        <div class="module-name">成就</div>
-        <div class="module-desc">暂未开放</div>
-      </div>
-    </div>
+    <div id="player-modules" style="display:flex;flex-wrap:wrap;gap:10px;"></div>
   </div>
 
   <div class="footer">
@@ -162,11 +146,11 @@
   </div>
   <div class="card">
     <h3>&#9876; 进行中的战斗</h3>
-    <div id="active-battles"><div style="color:#666;">暂无进行中的战斗</div></div>
+    <div id="active-battles"></div>
   </div>
   <div class="card">
     <h3>&#128218; 历史战斗</h3>
-    <div id="finished-battles"><div style="color:#666;">暂无历史战斗</div></div>
+    <div id="finished-battles"></div>
   </div>
   <div class="footer">
     <button class="btn btn-sm btn-outline" onclick="returnToPanel(this)">← 返回玩家面板</button>
@@ -247,6 +231,10 @@
   </div>
 </div>
 
+<script src="/static/js/player/state.js"></script>
+<script src="/static/js/common/ui.js"></script>
+<script src="/static/js/player/player_modules.js"></script>
+<script src="/static/js/player/module_manager.js"></script>
 <script src="/static/js/player/player_panel.js"></script>
 <script src="/static/js/player/battle.js"></script>
 <script src="/static/js/player/battle_module.js"></script>

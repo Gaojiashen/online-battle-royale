@@ -1,44 +1,9 @@
 // player_panel.js — Player Panel entry, homepage, return-to-panel
-// ═══════════════════════════════════════
-// Global State
-// ═══════════════════════════════════════
-let playerName = '';
-let battleId = '';
-let currentBattleId = '';
-let mySide = '';
-let currentState = '';
-let pollTimer = null;
-let availableCardsData = [];
-let selectedCards = [];
-
-// ═══════════════════════════════════════
-// Helpers
-// ═══════════════════════════════════════
-function setBtnLoading(btn, text) {
-  btn._origText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = text;
-}
-function resetBtn(btn) {
-  btn.disabled = false;
-  if (btn._origText) btn.textContent = btn._origText;
-}
-
-function showError(msg) {
-  const el = document.getElementById('error-bar');
-  el.textContent = msg; el.classList.remove('hidden');
-  setTimeout(() => el.classList.add('hidden'), 6000);
-}
-
-function now() { return new Date().toLocaleTimeString(); }
-
-// ═══════════════════════════════════════
-// Entry
-// ═══════════════════════════════════════
+// 依赖: state.js, common/ui.js, player_modules.js
 async function enterHome() {
   const name = document.getElementById('input-name').value.trim();
   if (!name) return;
-  playerName = name;
+  PlayerState.setPlayer(name);
 
   const btn = document.querySelector('#section-entry .btn-go');
   setBtnLoading(btn, '查询中...');
@@ -64,7 +29,7 @@ async function enterHome() {
 
 async function loadHome() {
   try {
-    const resp = await fetch(`/api/player/${encodeURIComponent(playerName)}/battles`);
+    const resp = await fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/battles`);
     const data = await resp.json();
     if (!data.ok) { showError('获取战斗列表失败'); return; }
     renderHome(data);
@@ -75,12 +40,27 @@ async function loadHome() {
 
 function renderHome(data) {
   document.getElementById('home-title').textContent = `${data.player_name} 的玩家面板`;
+  renderModules();
+}
+
+function renderModules() {
+  const container = document.getElementById('player-modules');
+  container.innerHTML = PlayerModules.map(m => {
+    const cls = m.enabled ? 'module-active' : 'module-locked';
+    const onclick = m.enabled ? `onclick="ModuleManager.open('${m.id}', this)"` : '';
+    const cursor = m.enabled ? 'cursor:pointer;' : '';
+    return `<div class="module-card ${cls}" ${onclick} style="${cursor}">
+      <div class="module-icon">${m.icon}</div>
+      <div class="module-name">${m.name}</div>
+      <div class="module-desc">${m.desc}</div>
+    </div>`;
+  }).join('');
 }
 
 async function returnToPanel(btn) {
   if (btn) setBtnLoading(btn, '返回中...');
   stopPolling();
-  currentBattleId = '';
+  PlayerState.clearBattle();
   document.getElementById('section-replay').classList.add('hidden');
   document.getElementById('section-battle').classList.add('hidden');
   document.getElementById('section-battle-module').classList.add('hidden');
