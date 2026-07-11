@@ -396,12 +396,8 @@ class BattleManager:
                 message="结算完成" if not result.battle_ended else f"战斗结束！胜者: {result.winner}",
             )
 
-            # 战斗结束时返回 sync task 供调用方 await
-            if result.battle_ended:
-                return response, asyncio.create_task(sync_coro)
-            else:
-                asyncio.create_task(sync_coro)
-                return response, None
+            # 统一返回 sync task 供调用方 await，确保 Base 在 HTTP 响应前已同步
+            return response, asyncio.create_task(sync_coro)
 
         except Exception as e:
             # 清除失败的提交
