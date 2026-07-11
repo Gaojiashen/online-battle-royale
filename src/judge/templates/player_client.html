@@ -72,6 +72,13 @@
   .error-bar { background:rgba(244,67,54,0.15); border:1px solid #F44336; padding:10px 16px; border-radius:6px; color:#F44336; font-size:14px; margin-bottom:14px; }
   .info-bar { background:rgba(33,150,243,0.15); border:1px solid #2196F3; padding:10px 16px; border-radius:6px; color:#90CAF9; font-size:14px; margin-bottom:14px; }
 
+  .deck-grid { display:flex; flex-wrap:wrap; gap:6px; }
+  .deck-card { background:#2a2a44; border:1px solid #3a3a55; border-radius:6px; padding:6px 8px; font-size:12px; min-width:80px; flex:1; max-width:120px; }
+  .deck-card .dc-id { color:#888; font-size:10px; }
+  .deck-card .dc-name { color:#e0d8c0; font-weight:600; }
+  .deck-card .dc-info { color:#999; font-size:10px; }
+  .deck-card .dc-effect { color:#aaa; font-size:10px; margin-top:2px; }
+
   .footer { text-align:right; font-size:12px; color:#555; margin-top:16px; }
   .footer button { margin-left:12px; }
 </style>
@@ -104,6 +111,10 @@
   <div id="battle-deck" class="card hidden">
     <h3>我的可用卡牌</h3>
     <div class="card-list" id="card-list"></div>
+    <div id="confirmed-deck-area" class="hidden">
+      <h4 style="color:#c9a84c;margin-top:12px;">已确认的牌库（8张）</h4>
+      <div id="confirmed-deck-list" class="deck-grid"></div>
+    </div>
     <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;">
       <span id="deck-count" style="color:#888;">已选择：0 / 8</span>
       <button class="btn btn-go" id="btn-confirm-deck" disabled onclick="confirmDeck()">确认牌库</button>
@@ -112,7 +123,15 @@
 
   <!-- Card submit -->
   <div id="battle-submit" class="card hidden">
-    <h3>本回合出牌</h3>
+    <div id="my-battle-deck-area">
+      <h4 style="color:#c9a84c;">我的牌库</h4>
+      <div id="my-battle-deck-list" class="deck-grid"></div>
+    </div>
+    <div id="opponent-battle-deck-area" style="margin-top:14px;">
+      <h4 style="color:#c9a84c;">对手牌库</h4>
+      <div id="opponent-battle-deck-list" class="deck-grid"></div>
+    </div>
+    <h3 style="margin-top:14px;">本回合出牌</h3>
     <select class="card-select" id="card-select"></select>
     <button class="btn btn-go" id="btn-submit-card" onclick="submitCard()">提交出牌</button>
     <div id="waiting-msg" class="waiting-msg hidden"></div>
@@ -143,6 +162,8 @@ let battleId = '';
 let mySide = '';
 let currentState = '';
 let pollTimer = null;
+let availableCardsData = [];
+let selectedCards = [];
 
 function showError(msg) {
   const el = document.getElementById('error-bar');
@@ -222,6 +243,14 @@ async function refreshAll() {
     if (finished) renderEndScreen(data);
     if (inBattle || finished) await loadBattleLogs();
 
+    // Show/hide confirmed deck in deck phase
+    if (inDeckPhase && data.deck_confirmed) {
+      document.getElementById('confirmed-deck-area').classList.remove('hidden');
+      renderDeckCards('confirmed-deck-list', data.my_deck, true);
+    } else {
+      document.getElementById('confirmed-deck-area').classList.add('hidden');
+    }
+
     // Auto-polling
     stopPolling();
     if (inDeckPhase && data.deck_confirmed && !data.deck_locked) {
@@ -273,12 +302,27 @@ function renderHPBar(name, hp) {
 }
 
 // ═══════════════════════════════════════
+// Deck display
+// ═══════════════════════════════════════
+function cardDetailHtml(c, showEffect) {
+  return `<div class="deck-card">
+    <div class="dc-id">${c.card_id||''}</div>
+    <div class="dc-name">${c.name||''}</div>
+    <div class="dc-info">${c.category||''} · ${c.aspect||''} · Lv${c.level_requirement||0}</div>
+    ${showEffect && c.effect_text ? `<div class="dc-effect">${c.effect_text}</div>` : ''}
+  </div>`;
+}
+function renderDeckCards(containerId, cards, showEffect) {
+  document.getElementById(containerId).innerHTML = cards.map(c => cardDetailHtml(c, showEffect)).join('');
+}
+
+// ═══════════════════════════════════════
 // Deck selection
 // ═══════════════════════════════════════
-let selectedCards = [];
 async function loadAvailableCards() {
   const resp = await fetch(`/api/player/${encodeURIComponent(playerName)}/available-cards`);
   const data = await resp.json();
+  availableCardsData = data.cards;
   selectedCards = data.cards.filter(c => c.selected).map(c => c.card_id);
   document.getElementById('deck-count').textContent = `已选择：${selectedCards.length} / 8`;
   updateConfirmBtn();
@@ -323,6 +367,9 @@ async function confirmDeck() {
     }
     if (data.status === 'waiting_for_opponent') {
       btn.textContent = '等待对手确认中...';
+      document.getElementById('confirmed-deck-area').classList.remove('hidden');
+      const myCards = availableCardsData.filter(c => selectedCards.includes(c.card_id));
+      renderDeckCards('confirmed-deck-list', myCards, true);
       startPolling(3000);
     } else {
       stopPolling();
@@ -340,9 +387,14 @@ async function confirmDeck() {
 // Card submit
 // ═══════════════════════════════════════
 async function loadBattleSubmit(data) {
-  const deck = data.my_deck || [];
+  const myDeck = data.my_deck || [];
+  const oppDeck = data.opponent_deck || [];
   const sel = document.getElementById('card-select');
-  sel.innerHTML = deck.map(cid => `<option value="${cid}">${cid}</option>`).join('');
+  sel.innerHTML = myDeck.map(c => `<option value="${c.card_id}">${c.name}</option>`).join('');
+
+  renderDeckCards('my-battle-deck-list', myDeck, true);
+  document.getElementById('opponent-battle-deck-area').classList.toggle('hidden', oppDeck.length === 0);
+  if (oppDeck.length > 0) renderDeckCards('opponent-battle-deck-list', oppDeck, false);
 
   if (data.my_submitted_this_round) {
     sel.disabled = true;
