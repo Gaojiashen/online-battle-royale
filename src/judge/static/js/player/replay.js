@@ -1,20 +1,36 @@
 // replay.js — Battle Replay view
 // 依赖: state.js, common/ui.js
+const LOADING_REPLAY = '<div style="color:#888;text-align:center;padding:20px;">加载中...</div>';
+let replayRequestId = 0;
+
+function resetReplayView() {
+  document.getElementById('replay-summary').innerHTML = LOADING_REPLAY;
+  document.getElementById('replay-rounds').innerHTML = LOADING_REPLAY;
+}
+
 function backToBattleModule() {
   document.getElementById('section-replay').classList.add('hidden');
   document.getElementById('section-battle-module').classList.remove('hidden');
+  resetReplayView();
 }
 
 async function loadReplay(bid) {
+  resetReplayView();
+  const requestId = ++replayRequestId;
   try {
     const [battleResp, logsResp] = await Promise.all([
       fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/battle?battle_id=${encodeURIComponent(bid)}`),
       fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/battle-logs?battle_id=${encodeURIComponent(bid)}`)
     ]);
+    if (requestId !== replayRequestId) return; // stale request
     const battle = await battleResp.json();
     const logs = await logsResp.json();
+    if (requestId !== replayRequestId) return;
     renderReplay(battle, logs);
   } catch (e) {
+    if (requestId !== replayRequestId) return;
+    document.getElementById('replay-summary').innerHTML = '<div style="color:#F44336;text-align:center;padding:20px;">加载失败</div>';
+    document.getElementById('replay-rounds').innerHTML = '';
     showError('加载回顾失败: ' + e.message);
   }
 }
@@ -37,7 +53,7 @@ function renderReplay(battle, logs) {
 
   const roundList = logs.logs || [];
   if (roundList.length === 0) {
-    document.getElementById('replay-rounds').innerHTML = '<div style="color:#666;">暂无回合记录</div>';
+    document.getElementById('replay-rounds').innerHTML = '<div style="color:#666;text-align:center;padding:12px;">暂无回合记录</div>';
     return;
   }
   document.getElementById('replay-rounds').innerHTML = roundList.map(l => {
