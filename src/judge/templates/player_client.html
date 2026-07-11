@@ -132,7 +132,7 @@
   <div class="card">
     <h3>功能模块</h3>
     <div style="display:flex;flex-wrap:wrap;gap:10px;">
-      <div class="module-card module-active" onclick="showBattleList()" style="cursor:pointer;">
+      <div class="module-card module-active" onclick="enterBattleModule()" style="cursor:pointer;">
         <div class="module-icon">&#9876;</div>
         <div class="module-name">战斗</div>
         <div class="module-desc">当前对战与历史回顾</div>
@@ -150,20 +150,26 @@
     </div>
   </div>
 
-  <!-- Battle module content -->
-  <div id="battle-module-content">
-    <div class="card">
-      <h3>&#9876; 进行中的战斗</h3>
-      <div id="active-battles"><div style="color:#666;">暂无进行中的战斗</div></div>
-    </div>
-    <div class="card">
-      <h3>&#128218; 历史战斗</h3>
-      <div id="finished-battles"><div style="color:#666;">暂无历史战斗</div></div>
-    </div>
-  </div>
-
   <div class="footer">
     <button class="btn btn-sm btn-outline" onclick="location.reload()">退出</button>
+  </div>
+</div>
+
+<!-- ========== Battle Module ========== -->
+<div id="section-battle-module" class="hidden">
+  <div class="card">
+    <h3 id="battle-module-title"></h3>
+  </div>
+  <div class="card">
+    <h3>&#9876; 进行中的战斗</h3>
+    <div id="active-battles"><div style="color:#666;">暂无进行中的战斗</div></div>
+  </div>
+  <div class="card">
+    <h3>&#128218; 历史战斗</h3>
+    <div id="finished-battles"><div style="color:#666;">暂无历史战斗</div></div>
+  </div>
+  <div class="footer">
+    <button class="btn btn-sm btn-outline" onclick="returnToPanel(this)">← 返回玩家面板</button>
   </div>
 </div>
 
@@ -315,8 +321,24 @@ async function loadHome() {
 
 function renderHome(data) {
   document.getElementById('home-title').textContent = `${data.player_name} 的玩家面板`;
+}
 
-  // Active battles
+async function enterBattleModule() {
+  document.getElementById('section-home').classList.add('hidden');
+  document.getElementById('section-battle-module').classList.remove('hidden');
+  try {
+    const resp = await fetch(`/api/player/${encodeURIComponent(playerName)}/battles`);
+    const data = await resp.json();
+    if (!data.ok) { showError('获取战斗列表失败'); return; }
+    renderBattleModule(data);
+  } catch (e) {
+    showError('加载战斗模块失败: ' + e.message);
+  }
+}
+
+function renderBattleModule(data) {
+  document.getElementById('battle-module-title').textContent = `⚔ ${data.player_name} 的战斗`;
+
   const active = data.active || [];
   const activeDiv = document.getElementById('active-battles');
   if (active.length === 0) {
@@ -334,7 +356,6 @@ function renderHome(data) {
     }).join('');
   }
 
-  // Finished battles
   const finished = data.finished || [];
   const finishedDiv = document.getElementById('finished-battles');
   if (finished.length === 0) {
@@ -358,7 +379,7 @@ function renderHome(data) {
 async function joinBattle(bid) {
   battleId = bid;
   currentBattleId = bid;
-  document.getElementById('section-home').classList.add('hidden');
+  document.getElementById('section-battle-module').classList.add('hidden');
   document.getElementById('section-battle').classList.remove('hidden');
   await refreshAll();
 }
@@ -367,7 +388,7 @@ async function viewReplay(bid) {
   const btn = document.querySelector(`button[onclick="viewReplay('${bid}')"]`);
   if (btn) setBtnLoading(btn, '加载中...');
   currentBattleId = bid;
-  document.getElementById('section-home').classList.add('hidden');
+  document.getElementById('section-battle-module').classList.add('hidden');
   document.getElementById('section-replay').classList.remove('hidden');
   await loadReplay(bid);
   if (btn) resetBtn(btn);
@@ -450,13 +471,10 @@ async function returnToPanel(btn) {
   currentBattleId = '';
   document.getElementById('section-replay').classList.add('hidden');
   document.getElementById('section-battle').classList.add('hidden');
+  document.getElementById('section-battle-module').classList.add('hidden');
   document.getElementById('section-home').classList.remove('hidden');
   await loadHome();
   if (btn) resetBtn(btn);
-}
-
-function showBattleList() {
-  document.getElementById('battle-module-content').scrollIntoView({behavior:'smooth'});
 }
 
 // ═══════════════════════════════════════
