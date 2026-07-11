@@ -87,6 +87,9 @@ async def player_submit_card(req: SubmitCardRequest, request: Request):
     if not side:
         raise HTTPException(status_code=400, detail="无法确定玩家侧")
     result = player_service.submit_card(req.battle_id, side.lower(), req.card_id, bm)
+    end_task = result.pop("_end_sync_task", None)
+    if end_task is not None:
+        await end_task
     if result.get("status") == "error":
         raise HTTPException(status_code=400, detail=result.get("message", ""))
     return result

@@ -335,10 +335,11 @@ async def select_deck(player_name: str, battle_id: str,
 def submit_card(battle_id: str, side: str, card_id: str,
                 battle_manager) -> dict:
     """提交本回合出牌 → 直接调 BattleManager"""
-    result = battle_manager.submit_card(battle_id, side, card_id)
+    result, end_sync_task = battle_manager.submit_card(battle_id, side, card_id)
+    resp = {}
     if result.status == "resolved" and result.result:
         r = result.result
-        return {
+        resp = {
             "ok": True, "status": "resolved", "round": result.round,
             "result": {
                 "my_card": r.card_a_name if side == "a" else r.card_b_name,
@@ -352,10 +353,14 @@ def submit_card(battle_id: str, side: str, card_id: str,
             },
             "message": "",
         }
-    return {
-        "ok": True, "status": result.status,
-        "round": result.round, "message": result.message,
-    }
+    else:
+        resp = {
+            "ok": True, "status": result.status,
+            "round": result.round, "message": result.message,
+        }
+    if end_sync_task is not None:
+        resp["_end_sync_task"] = end_sync_task
+    return resp
 
 
 # ════════════════════════════════════════════════════

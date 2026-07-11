@@ -179,22 +179,22 @@ class BattleManager:
             message=f"牌库已锁定。第1回合开始！",
         )
 
-    def submit_card(self, battle_id: str, side: str, card_id: str) -> WebhookResponse:
-        """玩家提交卡牌"""
+    def submit_card(self, battle_id: str, side: str, card_id: str):
+        """玩家提交卡牌 → 返回 (WebhookResponse, Optional[Task])"""
         session = self._battles.get(battle_id)
         if not session:
             return WebhookResponse(status="error",
-                                   message=f"对战 {battle_id} 状态丢失（服务可能已重启），请重新发起对战")
+                                   message=f"对战 {battle_id} 状态丢失（服务可能已重启），请重新发起对战"), None
 
         if session.state != "in_progress":
             return WebhookResponse(battle_id=battle_id, status="error",
-                                   message=f"对战不在进行中: {session.state}")
+                                   message=f"对战不在进行中: {session.state}"), None
 
         # 校验卡牌在牌库中
         deck = session.player_a_deck if side == "a" else session.player_b_deck
         if card_id not in deck:
             return WebhookResponse(battle_id=battle_id, status="error",
-                                   message=f"卡牌 {card_id} 不在本场牌库中")
+                                   message=f"卡牌 {card_id} 不在本场牌库中"), None
 
         # 存储提交
         player_name = session.player_a_name if side == "a" else session.player_b_name
@@ -220,10 +220,10 @@ class BattleManager:
             round=session.current_round,
             status="waiting_for_opponent",
             message=f"等待对手({other_side})提交",
-        )
+        ), None
 
-    def _resolve_round(self, session: BattleSession) -> WebhookResponse:
-        """结算当前回合"""
+    def _resolve_round(self, session: BattleSession):
+        """结算当前回合 → 返回 (WebhookResponse, Optional[Task])"""
         resolver = session.resolver
         state_a = session.state_a
         state_b = session.state_b
@@ -249,7 +249,7 @@ class BattleManager:
             else:
                 session.current_round += 1
 
-            # 异步同步回合结果到飞书Base
+            # 同步回合结果到飞书Base
             import asyncio
             state_a_dict = {
                 "hp": state_a.hp, "edge": state_a.edge,
@@ -263,7 +263,7 @@ class BattleManager:
                 "chill": state_b.self_chill, "pulse": state_b.pulse,
                 "read": state_b.read, "insight": state_b.insight,
             } if state_b else None
-            asyncio.create_task(base_sync.sync_round_result(
+            sync_coro = base_sync.sync_round_result(
                 battle_id=session.id,
                 round_number=result.round_number,
                 card_a_name=f"{result.card_a.id} {result.card_a.name}",
@@ -278,15 +278,22 @@ class BattleManager:
                 battle_ended=result.battle_ended,
                 state_a=state_a_dict,
                 state_b=state_b_dict,
-            ))
+            )
 
-            return WebhookResponse(
+            response = WebhookResponse(
                 battle_id=session.id,
                 round=result.round_number,
                 status="resolved",
                 result=_round_to_log(result),
                 message="结算完成" if not result.battle_ended else f"战斗结束！胜者: {result.winner}",
             )
+
+            # 战斗结束时返回 sync task 供调用方 await
+            if result.battle_ended:
+                return response, asyncio.create_task(sync_coro)
+            else:
+                asyncio.create_task(sync_coro)
+                return response, None
 
         except Exception as e:
             # 清除失败的提交
@@ -297,7 +304,7 @@ class BattleManager:
                 round=session.current_round,
                 status="error",
                 message=str(e),
-            )
+            ), None
 
     def get_status(self, battle_id: str) -> Optional[BattleStatusResponse]:
         """查询对战状态"""
