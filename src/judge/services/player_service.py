@@ -103,7 +103,8 @@ async def get_player_battle(name: str, battle_manager=None) -> dict:
     opp_hp = _int_field(opp_record, "战HP", 20) if opp_record else 20
 
     # 5. 读牌库
-    deck = _read_deck_slots(my_record)
+    my_deck_ids = _read_deck_slots(my_record)
+    opp_deck_ids = _read_deck_slots(opp_record)
     deck_confirmed = _bool_field(my_record, "牌库已确认")
     deck_locked = (state_info["fields"].get("状态", "") not in ("已初始化", "选牌中"))
 
@@ -122,7 +123,8 @@ async def get_player_battle(name: str, battle_manager=None) -> dict:
         "my_hp": my_hp,
         "opponent_hp": opp_hp,
         "my_resources": _extract_resources(my_record),
-        "my_deck": deck,
+        "my_deck": _deck_to_detail(my_deck_ids, include_effect=True),
+        "opponent_deck": _deck_to_detail(opp_deck_ids, include_effect=False),
         "deck_confirmed": deck_confirmed,
         "deck_locked": deck_locked,
         "my_submitted_this_round": my_submitted,
@@ -384,6 +386,24 @@ def _read_deck_slots(record) -> List[str]:
         return []
     f = record.get("fields", {})
     return [f.get(f"牌位{i}", "") or "" for i in range(1, 9) if f.get(f"牌位{i}")]
+
+
+def _deck_to_detail(deck_ids: List[str], include_effect: bool = True) -> List[dict]:
+    """将卡牌ID列表展开为详情列表，include_effect=False 时不返回效果文本"""
+    result = []
+    for cid in deck_ids:
+        card = CARDS_BY_ID.get(cid)
+        info = {
+            "card_id": cid,
+            "name": card.name if card else "",
+            "category": card.category if card else "",
+            "aspect": card.aspect if card else "",
+            "level_requirement": card.level_requirement if card else 0,
+        }
+        if include_effect:
+            info["effect_text"] = card.effect_text if card else ""
+        result.append(info)
+    return result
 
 
 async def _get_battle_state(battle_id: str) -> str:
