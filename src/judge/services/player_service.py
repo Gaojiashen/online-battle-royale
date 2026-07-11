@@ -110,9 +110,9 @@ async def get_player_battles(name: str) -> dict:
 
         if state != "已结束":
             result = "进行中"
-        elif not winner_name or winner_name == "平局":
+        elif not winner_name or winner_name == "draw":
             result = "平局"
-        elif winner_name == name:
+        elif winner_name.upper() == side.upper():
             result = "胜利"
         else:
             result = "失败"
