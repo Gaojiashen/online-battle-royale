@@ -156,12 +156,28 @@ class BaseSync:
             if state_b:
                 await self._update_player_state(battle_id, "B", state_b)
 
-            # 3. 如果战斗结束，更新对战管理
+            # 3. 如果战斗结束，更新对战管理；否则仅更新当前回合
             if battle_ended:
                 await self._update_battle_finished(battle_id, winner, round_number)
+            else:
+                await self._sync_battle_round(battle_id, round_number)
 
         except Exception as e:
             logger.error(f"Base同步失败 (round): {e}")
+
+    async def _sync_battle_round(self, battle_id: str, round_number: int):
+        """更新对战管理表的当前回合字段"""
+        records = await feishu_client.list_records(
+            self.base_token, TABLE_BATTLE
+        )
+        for r in records:
+            fields = r.get("fields", {})
+            if fields.get("对战ID") == battle_id:
+                await feishu_client.update_record(
+                    self.base_token, TABLE_BATTLE, r["record_id"],
+                    {"当前回合": round_number},
+                )
+                return
 
     async def _update_player_state(
         self, battle_id: str, side: str, resources: Dict[str, int]
