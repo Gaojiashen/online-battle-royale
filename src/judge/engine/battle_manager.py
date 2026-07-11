@@ -97,11 +97,36 @@ class BattleManager:
             message=f"对战创建成功。A可用{len(a_available)}张, B可用{len(b_available)}张。请双方从可用牌中各选{DECK_SIZE}张。",
         )
 
+    def restore_session(self, battle_id: str, player_a_name: str,
+                        player_b_name: str, player_a_aspects: Dict[str, int],
+                        player_b_aspects: Dict[str, int]):
+        """从 Base 数据重建对战会话（服务重启后恢复）"""
+        if battle_id in self._battles:
+            return  # 已存在，无需重建
+
+        a_available = calculate_available(player_a_aspects)
+        b_available = calculate_available(player_b_aspects)
+
+        session = BattleSession(
+            id=battle_id,
+            player_a_name=player_a_name,
+            player_b_name=player_b_name,
+            player_a_base_token="",
+            player_b_base_token="",
+            player_a_aspects=player_a_aspects,
+            player_b_aspects=player_b_aspects,
+            player_a_available=[c.id for c in a_available],
+            player_b_available=[c.id for c in b_available],
+            state="deck_selection",
+        )
+        self._battles[battle_id] = session
+        logger.info(f"Session 从Base恢复: {battle_id} ({player_a_name} vs {player_b_name})")
+
     async def confirm_deck(self, req: DeckConfirmRequest) -> DeckConfirmResponse:
         """确认牌库，开始对战"""
         session = self._battles.get(req.battle_id)
         if not session:
-            raise ValueError(f"对战不存在: {req.battle_id}")
+            raise ValueError(f"对战不存在: {req.battle_id}（服务可能已重启，请重新发起对战）")
 
         # 校验牌库
         result_a = validate_deck(req.player_a_deck, session.player_a_aspects)
@@ -158,7 +183,8 @@ class BattleManager:
         """玩家提交卡牌"""
         session = self._battles.get(battle_id)
         if not session:
-            return WebhookResponse(status="error", message=f"对战不存在: {battle_id}")
+            return WebhookResponse(status="error",
+                                   message=f"对战 {battle_id} 状态丢失（服务可能已重启），请重新发起对战")
 
         if session.state != "in_progress":
             return WebhookResponse(battle_id=battle_id, status="error",

@@ -180,6 +180,33 @@ async def battle_confirm_from_base(req: ConfirmFromBaseRequest, request: Request
 
     if both_ready:
         # 双方都确认了，调用confirm_deck
+        # 如果 Session 因服务重启丢失，从 Base 重建
+        if req.battle_id not in bm._battles:
+            import json
+            # 从刚才读取的 Base 数据中获取 player 信息
+            a_name = ""
+            b_name = ""
+            a_aspects = {}
+            b_aspects = {}
+            try:
+                battle_records = await feishu_client.list_records(
+                    req.base_token, "tblWciOhRlFFEaSr"
+                )
+                for r in battle_records:
+                    fields = r.get("fields", {})
+                    if fields.get("对战ID") == req.battle_id:
+                        a_name = fields.get("玩家A名称", "")
+                        b_name = fields.get("玩家B名称", "")
+                        a_aspects_raw = fields.get("玩家A性相等级", "{}")
+                        b_aspects_raw = fields.get("玩家B性相等级", "{}")
+                        a_aspects = {k: int(v) for k, v in (json.loads(a_aspects_raw) if isinstance(a_aspects_raw, str) else a_aspects_raw).items()}
+                        b_aspects = {k: int(v) for k, v in (json.loads(b_aspects_raw) if isinstance(b_aspects_raw, str) else b_aspects_raw).items()}
+                        break
+                if a_name and b_name:
+                    bm.restore_session(req.battle_id, a_name, b_name, a_aspects, b_aspects)
+            except Exception as e:
+                logger.error(f"恢复Session失败: {e}")
+
         session = bm._battles.get(req.battle_id)
         if session:
             a_cards = []

@@ -185,6 +185,8 @@ async def select_deck(player_name: str, battle_id: str,
     if battle is None:
         return {"ok": False, "message": f"对战不存在: {battle_id}"}
     side = _which_side(battle["fields"], player_name)
+    if not side:
+        return {"ok": False, "message": f"玩家 {player_name} 不在对战 {battle_id} 中"}
 
     # 2. 校验卡牌：全部必须在玩家可用牌中
     valid_ids = await _get_available_card_ids(battle_id, side)
@@ -208,6 +210,26 @@ async def select_deck(player_name: str, battle_id: str,
         if len(a_deck) != 8 or len(b_deck) != 8:
             return {"ok": False, "status": "error",
                     "message": f"牌库不完整 A:{len(a_deck)} B:{len(b_deck)}"}
+
+        # 5.5 如果 Session 因服务重启丢失，从 Base 重建
+        if battle_id not in battle_manager._battles:
+            import json
+            a_name = battle["fields"].get("玩家A名称", "")
+            b_name = battle["fields"].get("玩家B名称", "")
+            a_aspects_raw = battle["fields"].get("玩家A性相等级", "{}")
+            b_aspects_raw = battle["fields"].get("玩家B性相等级", "{}")
+            try:
+                a_aspects = json.loads(a_aspects_raw) if isinstance(a_aspects_raw, str) else a_aspects_raw
+                b_aspects = json.loads(b_aspects_raw) if isinstance(b_aspects_raw, str) else b_aspects_raw
+                # 确保值为 int
+                a_aspects = {k: int(v) for k, v in a_aspects.items()}
+                b_aspects = {k: int(v) for k, v in b_aspects.items()}
+            except (json.JSONDecodeError, TypeError, ValueError):
+                logger.error(f"解析性相JSON失败: A={a_aspects_raw}, B={b_aspects_raw}")
+                return {"ok": False, "status": "error", "message": "无法解析玩家性相数据"}
+            battle_manager.restore_session(
+                battle_id, a_name, b_name, a_aspects, b_aspects,
+            )
 
         # 6. 调用 BattleManager
         from models import DeckConfirmRequest
