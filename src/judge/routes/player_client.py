@@ -49,19 +49,19 @@ async def player_battles(name: str):
 
 
 @router.get("/api/player/{name}/battle")
-async def player_battle(name: str, request: Request):
+async def player_battle(name: str, request: Request, battle_id: str = ""):
     """获取玩家视角的战斗状态"""
     bm = request.app.state.battle_manager
-    result = await player_service.get_player_battle(name, bm)
+    result = await player_service.get_player_battle(name, bm, battle_id=battle_id)
     if not result.get("ok"):
         raise HTTPException(status_code=404, detail=result.get("message", ""))
     return result
 
 
 @router.get("/api/player/{name}/available-cards")
-async def player_available_cards(name: str):
+async def player_available_cards(name: str, battle_id: str = ""):
     """获取玩家可用卡牌列表"""
-    result = await player_service.get_available_cards(name)
+    result = await player_service.get_available_cards(name, battle_id=battle_id)
     if not result.get("ok"):
         raise HTTPException(status_code=404, detail=result.get("message", ""))
     return result
@@ -93,9 +93,10 @@ async def player_submit_card(req: SubmitCardRequest, request: Request):
 
 
 @router.get("/api/player/{name}/battle-logs")
-async def player_battle_logs(name: str):
+async def player_battle_logs(name: str, request: Request, battle_id: str = ""):
     """获取玩家视角的战斗日志"""
-    result = await player_service.get_battle_logs(name)
+    bm = request.app.state.battle_manager
+    result = await player_service.get_battle_logs(name, bm, battle_id=battle_id)
     if not result.get("ok"):
         raise HTTPException(status_code=404, detail=result.get("message", ""))
     return result

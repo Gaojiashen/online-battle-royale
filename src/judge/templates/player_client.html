@@ -189,6 +189,7 @@
 // ═══════════════════════════════════════
 let playerName = '';
 let battleId = '';
+let currentBattleId = '';
 let mySide = '';
 let currentState = '';
 let pollTimer = null;
@@ -291,6 +292,7 @@ function renderHome(data) {
 
 function joinBattle(bid) {
   battleId = bid;
+  currentBattleId = bid;
   document.getElementById('section-home').classList.add('hidden');
   document.getElementById('section-battle').classList.remove('hidden');
   refreshAll();
@@ -306,7 +308,7 @@ function viewReplay(bid) {
 // ═══════════════════════════════════════
 async function refreshAll() {
   try {
-    const resp = await fetch(`/api/player/${encodeURIComponent(playerName)}/battle`);
+    const resp = await fetch(`/api/player/${encodeURIComponent(playerName)}/battle?battle_id=${encodeURIComponent(currentBattleId)}`);
     if (!resp.ok) { showError('获取战斗状态失败'); return; }
     const data = await resp.json();
     currentState = data.state;
@@ -407,7 +409,7 @@ function renderDeckCards(containerId, cards, showEffect) {
 // Deck selection
 // ═══════════════════════════════════════
 async function loadAvailableCards() {
-  const resp = await fetch(`/api/player/${encodeURIComponent(playerName)}/available-cards`);
+  const resp = await fetch(`/api/player/${encodeURIComponent(playerName)}/available-cards?battle_id=${encodeURIComponent(currentBattleId)}`);
   const data = await resp.json();
   availableCardsData = data.cards;
   selectedCards = data.cards.filter(c => c.selected).map(c => c.card_id);
@@ -536,7 +538,7 @@ function renderEndScreen(data) {
 // Battle logs
 // ═══════════════════════════════════════
 async function loadBattleLogs() {
-  const resp = await fetch(`/api/player/${encodeURIComponent(playerName)}/battle-logs`);
+  const resp = await fetch(`/api/player/${encodeURIComponent(playerName)}/battle-logs?battle_id=${encodeURIComponent(currentBattleId)}`);
   const data = await resp.json();
   if (!data.logs || data.logs.length === 0) {
     document.getElementById('logs-body').innerHTML = '<div style="color:#666;">暂无记录</div>';

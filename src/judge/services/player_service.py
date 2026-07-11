@@ -141,15 +141,20 @@ async def get_player_battles(name: str) -> dict:
 # 战斗状态（玩家视角）
 # ════════════════════════════════════════════════════
 
-async def get_player_battle(name: str, battle_manager=None) -> dict:
+async def get_player_battle(name: str, battle_manager=None, battle_id: str = "") -> dict:
     """获取玩家当前战斗的完整状态（玩家视角）"""
-    # 1. 找战斗
-    battle = await _find_player_battle(name)
-    if not battle:
-        return {"ok": False, "message": f"玩家 {name} 没有进行中的战斗"}
-
-    battle_id = battle["fields"].get("对战ID", "")
-    side = battle["fields"].get("玩家侧", "")
+    # 1. 找战斗：优先使用指定的 battle_id
+    if battle_id:
+        battle = await _find_player_in_battle(name, battle_id)
+        if not battle:
+            return {"ok": False, "message": f"玩家 {name} 不在对战 {battle_id} 中"}
+        side = battle["fields"].get("玩家侧", "")
+    else:
+        battle = await _find_player_battle(name)
+        if not battle:
+            return {"ok": False, "message": f"玩家 {name} 没有进行中的战斗"}
+        battle_id = battle["fields"].get("对战ID", "")
+        side = battle["fields"].get("玩家侧", "")
 
     # 2. 从对战管理查回合/状态/胜者 + 对手名
     state_info = await _get_battle_record(battle_id)
@@ -199,14 +204,19 @@ async def get_player_battle(name: str, battle_manager=None) -> dict:
 # 可用卡牌
 # ════════════════════════════════════════════════════
 
-async def get_available_cards(name: str) -> dict:
+async def get_available_cards(name: str, battle_id: str = "") -> dict:
     """获取当前玩家的可用卡牌列表"""
-    battle = await _find_player_battle(name)
-    if not battle:
-        return {"ok": False, "message": f"玩家 {name} 没有进行中的战斗"}
-
-    battle_id = battle["fields"].get("对战ID", "")
-    side = battle["fields"].get("玩家侧", "")
+    if battle_id:
+        battle = await _find_player_in_battle(name, battle_id)
+        if not battle:
+            return {"ok": False, "message": f"玩家 {name} 不在对战 {battle_id} 中"}
+        side = battle["fields"].get("玩家侧", "")
+    else:
+        battle = await _find_player_battle(name)
+        if not battle:
+            return {"ok": False, "message": f"玩家 {name} 没有进行中的战斗"}
+        battle_id = battle["fields"].get("对战ID", "")
+        side = battle["fields"].get("玩家侧", "")
 
     # 检查牌库是否已锁定
     my_record = await _get_player_state_record(battle_id, side)
@@ -352,13 +362,19 @@ def submit_card(battle_id: str, side: str, card_id: str,
 # 战斗日志（玩家视角）
 # ════════════════════════════════════════════════════
 
-async def get_battle_logs(name: str) -> dict:
+async def get_battle_logs(name: str, battle_manager=None, battle_id: str = "") -> dict:
     """获取玩家视角的战斗日志"""
-    battle = await _find_player_battle(name)
-    if not battle:
-        return {"ok": False, "message": f"玩家 {name} 没有进行中的战斗"}
-    battle_id = battle["fields"].get("对战ID", "")
-    side = battle["fields"].get("玩家侧", "")
+    if battle_id:
+        battle = await _find_player_in_battle(name, battle_id)
+        if not battle:
+            return {"ok": False, "message": f"玩家 {name} 不在对战 {battle_id} 中"}
+        side = battle["fields"].get("玩家侧", "")
+    else:
+        battle = await _find_player_battle(name)
+        if not battle:
+            return {"ok": False, "message": f"玩家 {name} 没有进行中的战斗"}
+        battle_id = battle["fields"].get("对战ID", "")
+        side = battle["fields"].get("玩家侧", "")
 
     records = await feishu_client.list_records(BASE_TOKEN, TABLE_BATTLE_LOG)
     logs = []
@@ -491,6 +507,16 @@ async def _get_player_state_record(battle_id: str, side: str) -> Optional[dict]:
     for r in records:
         fields = r.get("fields", {})
         if fields.get("对战ID") == battle_id and fields.get("玩家侧") == side:
+            return r
+    return None
+
+
+async def _find_player_in_battle(name: str, battle_id: str) -> Optional[dict]:
+    """查找玩家在指定对战中的记录（返回 TABLE_PLAYER_STATE 记录）"""
+    records = await feishu_client.list_records(BASE_TOKEN, TABLE_PLAYER_STATE)
+    for r in records:
+        fields = r.get("fields", {})
+        if fields.get("玩家名称") == name and fields.get("对战ID") == battle_id:
             return r
     return None
 
