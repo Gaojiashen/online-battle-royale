@@ -101,23 +101,28 @@ function renderDeckCards(containerId, cards, showEffect) {
 // Deck selection
 // ═══════════════════════════════════════
 async function loadAvailableCards() {
-  const resp = await fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/available-cards?battle_id=${encodeURIComponent(PlayerState.currentBattleId)}`);
-  const data = await resp.json();
-  PlayerState.availableCardsData = data.cards;
-  PlayerState.selectedCards = data.cards.filter(c => c.selected).map(c => c.card_id);
-  document.getElementById('deck-count').textContent = `已选择：${PlayerState.selectedCards.length} / 8`;
-  updateConfirmBtn();
+  document.getElementById('card-list').innerHTML = '<div style="color:#888;text-align:center;padding:20px;">加载中...</div>';
+  try {
+    const resp = await fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/available-cards?battle_id=${encodeURIComponent(PlayerState.currentBattleId)}`);
+    const data = await resp.json();
+    PlayerState.availableCardsData = data.cards;
+    PlayerState.selectedCards = data.cards.filter(c => c.selected).map(c => c.card_id);
+    document.getElementById('deck-count').textContent = `已选择：${PlayerState.selectedCards.length} / 8`;
+    updateConfirmBtn();
 
-  document.getElementById('card-list').innerHTML = data.cards.map(c => {
-    const sel = PlayerState.selectedCards.includes(c.card_id);
-    return `<div class="card-row${sel?' selected':''}" onclick="toggleCard('${c.card_id}',this)" data-cid="${c.card_id}">
-      <div class="check">${sel?'✓':''}</div>
-      <div class="cinfo">
-        <div class="cname">${c.name}</div>
-        <div class="cdetail">${c.category} · ${c.aspect} · ${c.effect_text||''}</div>
-      </div>
-    </div>`;
-  }).join('');
+    document.getElementById('card-list').innerHTML = data.cards.map(c => {
+      const sel = PlayerState.selectedCards.includes(c.card_id);
+      return `<div class="card-row${sel?' selected':''}" onclick="toggleCard('${c.card_id}',this)" data-cid="${c.card_id}">
+        <div class="check">${sel?'✓':''}</div>
+        <div class="cinfo">
+          <div class="cname">${c.name}</div>
+          <div class="cdetail">${c.category} · ${c.aspect} · ${c.effect_text||''}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    document.getElementById('card-list').innerHTML = '<div style="color:#F44336;text-align:center;padding:20px;">加载失败，请刷新</div>';
+  }
 }
 function toggleCard(cid, el) {
   const idx = PlayerState.selectedCards.indexOf(cid);
@@ -181,7 +186,9 @@ async function loadBattleSubmit(data) {
     document.getElementById('waiting-msg').textContent = '⏳ 本回合已提交，等待对手中...';
   } else {
     sel.disabled = false;
-    document.getElementById('btn-submit-card').disabled = false;
+    const submitBtn = document.getElementById('btn-submit-card');
+    submitBtn.disabled = false;
+    submitBtn.textContent = '提交出牌';
     document.getElementById('waiting-msg').classList.add('hidden');
   }
 }
@@ -208,7 +215,6 @@ async function submitCard() {
       document.getElementById('waiting-msg').classList.remove('hidden');
       document.getElementById('waiting-msg').textContent = '⏳ 本回合已提交，等待对手中...';
       await refreshAll();
-      startPolling(2000);
     } else {
       await refreshAll();
     }
@@ -244,19 +250,28 @@ function renderEndScreen(data) {
 // Battle logs
 // ═══════════════════════════════════════
 async function loadBattleLogs() {
-  const resp = await fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/battle-logs?battle_id=${encodeURIComponent(PlayerState.currentBattleId)}`);
-  const data = await resp.json();
-  if (!data.logs || data.logs.length === 0) {
-    document.getElementById('logs-body').innerHTML = '<div style="color:#666;">暂无记录</div>';
-    return;
+  document.getElementById('logs-body').innerHTML = '<div style="color:#888;text-align:center;padding:12px;">加载中...</div>';
+  try {
+    const resp = await fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/battle-logs?battle_id=${encodeURIComponent(PlayerState.currentBattleId)}`);
+    const data = await resp.json();
+    if (!data.logs || data.logs.length === 0) {
+      document.getElementById('logs-body').innerHTML = '<div style="color:#666;">暂无记录</div>';
+      return;
+    }
+    document.getElementById('logs-body').innerHTML = data.logs.map(l => {
+      const mc = l.my_card || {};
+      const oc = l.opponent_card || {};
+      const myName = typeof mc === 'string' ? mc : (mc.card_id ? `${mc.card_id} ${mc.name}` : (mc.name || '?'));
+      const oppName = typeof oc === 'string' ? oc : (oc.card_id ? `${oc.card_id} ${oc.name}` : (oc.name || '?'));
+      return `<div class="log-entry">
+        <span class="lrnd">R${l.round}</span>
+        <span class="lsep">|</span>
+        ${myName} vs ${oppName}
+        <span class="lsep">|</span>
+        ${l.rps_description||''}
+      </div>`;
+    }).join('');
+  } catch (e) {
+    document.getElementById('logs-body').innerHTML = '<div style="color:#F44336;text-align:center;padding:12px;">加载日志失败</div>';
   }
-  document.getElementById('logs-body').innerHTML = data.logs.map(l =>
-    `<div class="log-entry">
-      <span class="lrnd">R${l.round}</span>
-      <span class="lsep">|</span>
-      ${l.my_card||'?'} vs ${l.opponent_card||'?'}
-      <span class="lsep">|</span>
-      ${l.rps_description||''}
-    </div>`
-  ).join('');
 }

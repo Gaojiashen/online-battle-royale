@@ -1,5 +1,10 @@
 // replay.js — Battle Replay view
 // 依赖: state.js, common/ui.js
+function backToBattleModule() {
+  document.getElementById('section-replay').classList.add('hidden');
+  document.getElementById('section-battle-module').classList.remove('hidden');
+}
+
 async function loadReplay(bid) {
   try {
     const [battleResp, logsResp] = await Promise.all([
