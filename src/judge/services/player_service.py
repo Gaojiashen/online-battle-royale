@@ -363,7 +363,7 @@ def submit_card(battle_id: str, side: str, card_id: str,
 # ════════════════════════════════════════════════════
 
 async def get_battle_logs(name: str, battle_manager=None, battle_id: str = "") -> dict:
-    """获取玩家视角的战斗日志"""
+    """获取玩家视角的战斗日志 — 内存优先，Base 回退"""
     if battle_id:
         battle = await _find_player_in_battle(name, battle_id)
         if not battle:
@@ -376,20 +376,80 @@ async def get_battle_logs(name: str, battle_manager=None, battle_id: str = "") -
         battle_id = battle["fields"].get("对战ID", "")
         side = battle["fields"].get("玩家侧", "")
 
+    # 优先读内存（RoundResult 含完整 Card 对象、资源日志、特殊事件）
+    if battle_manager is not None:
+        session = battle_manager._battles.get(battle_id)
+        if session is not None and session.rounds:
+            logs = []
+            for r in session.rounds:
+                my_card = r.card_a if side == "A" else r.card_b
+                opp_card = r.card_b if side == "A" else r.card_a
+                my_resources = r.resource_logs_a if side == "A" else r.resource_logs_b
+                opp_resources = r.resource_logs_b if side == "A" else r.resource_logs_a
+                my_hp_after = r.state_a_after.hp if r.state_a_after else 0 if side == "A" else r.state_b_after.hp if r.state_b_after else 0
+                opp_hp_after = r.state_b_after.hp if r.state_b_after else 0 if side == "A" else r.state_a_after.hp if r.state_a_after else 0
+                logs.append({
+                    "round": r.round_number,
+                    "my_card": {
+                        "card_id": my_card.id, "name": my_card.name,
+                        "category": my_card.category, "aspect": my_card.aspect,
+                        "level_requirement": my_card.level_requirement,
+                        "effect_text": my_card.effect_text,
+                    },
+                    "opponent_card": {
+                        "card_id": opp_card.id, "name": opp_card.name,
+                        "category": opp_card.category, "aspect": opp_card.aspect,
+                        "level_requirement": opp_card.level_requirement,
+                        "effect_text": opp_card.effect_text,
+                    },
+                    "rps_description": r.rps_description,
+                    "damage_to_me": r.damage_to_a if side == "A" else r.damage_to_b,
+                    "damage_to_opponent": r.damage_to_b if side == "A" else r.damage_to_a,
+                    "my_hp_after": my_hp_after,
+                    "opponent_hp_after": opp_hp_after,
+                    "special_events": r.special_events,
+                    "my_resource_logs": my_resources,
+                    "opponent_resource_logs": opp_resources,
+                })
+            logs.sort(key=lambda x: x["round"])
+            return {"ok": True, "battle_id": battle_id, "logs": logs}
+
+    # Base 回退：从 TABLE_BATTLE_LOG 读取并补全卡牌详情
     records = await feishu_client.list_records(BASE_TOKEN, TABLE_BATTLE_LOG)
     logs = []
     for r in records:
         fields = r.get("fields", {})
         if fields.get("对战ID") == battle_id:
+            my_card_str = fields.get("A使用卡牌" if side == "A" else "B使用卡牌", "")
+            opp_card_str = fields.get("B使用卡牌" if side == "A" else "A使用卡牌", "")
+            my_card_id = my_card_str.split(" ")[0] if my_card_str else ""
+            opp_card_id = opp_card_str.split(" ")[0] if opp_card_str else ""
+            my_card = CARDS_BY_ID.get(my_card_id)
+            opp_card = CARDS_BY_ID.get(opp_card_id)
             logs.append({
                 "round": _int_field(r, "回合编号", 0),
-                "my_card": fields.get("A使用卡牌" if side == "A" else "B使用卡牌", ""),
-                "opponent_card": fields.get("B使用卡牌" if side == "A" else "A使用卡牌", ""),
+                "my_card": {
+                    "card_id": my_card_id, "name": my_card.name if my_card else my_card_str,
+                    "category": my_card.category if my_card else "",
+                    "aspect": my_card.aspect if my_card else "",
+                    "level_requirement": my_card.level_requirement if my_card else 0,
+                    "effect_text": my_card.effect_text if my_card else "",
+                },
+                "opponent_card": {
+                    "card_id": opp_card_id, "name": opp_card.name if opp_card else opp_card_str,
+                    "category": opp_card.category if opp_card else "",
+                    "aspect": opp_card.aspect if opp_card else "",
+                    "level_requirement": opp_card.level_requirement if opp_card else 0,
+                    "effect_text": opp_card.effect_text if opp_card else "",
+                },
                 "rps_description": fields.get("RPS结果描述", ""),
                 "damage_to_me": _int_field(r, "A受到伤害" if side == "A" else "B受到伤害", 0),
                 "damage_to_opponent": _int_field(r, "B受到伤害" if side == "A" else "A受到伤害", 0),
                 "my_hp_after": _int_field(r, "A剩余HP" if side == "A" else "B剩余HP", 20),
                 "opponent_hp_after": _int_field(r, "B剩余HP" if side == "A" else "A剩余HP", 20),
+                "special_events": (fields.get("特殊事件", "") or "").split("; "),
+                "my_resource_logs": [],
+                "opponent_resource_logs": [],
             })
     logs.sort(key=lambda x: x["round"])
     return {"ok": True, "battle_id": battle_id, "logs": logs}
