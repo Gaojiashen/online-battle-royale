@@ -63,11 +63,17 @@ function hpColor(hp) {
   return 'red';
 }
 function renderBattleStatus(data) {
+  let displayState = data.state;
+  if (data.state === '对战中') {
+    displayState = data.my_submitted_this_round ? '等待对方出牌' : '待出牌';
+  } else if (data.state === '已初始化' || data.state === '选牌中') {
+    displayState = '选牌中';
+  }
   let html = '';
   html += renderHPBar(PlayerState.playerName, data.my_hp);
   html += '<div class="vs-divider">VS</div>';
   html += renderHPBar(data.opponent_name, data.opponent_hp);
-  html += `<div style="text-align:center;margin-top:8px;color:#888;">当前回合：${data.current_round} · 状态：${data.state}</div>`;
+  html += `<div style="text-align:center;margin-top:8px;color:#888;">当前回合：${data.current_round} · ${displayState}</div>`;
   document.getElementById('status-body').innerHTML = html;
 
   const r = data.my_resources || {};
