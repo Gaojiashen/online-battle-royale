@@ -196,6 +196,16 @@ let pollTimer = null;
 let availableCardsData = [];
 let selectedCards = [];
 
+function setBtnLoading(btn, text) {
+  btn._origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = text;
+}
+function resetBtn(btn) {
+  btn.disabled = false;
+  if (btn._origText) btn.textContent = btn._origText;
+}
+
 function showError(msg) {
   const el = document.getElementById('error-bar');
   el.textContent = msg; el.classList.remove('hidden');
@@ -213,16 +223,14 @@ async function enterHome() {
   playerName = name;
 
   const btn = document.querySelector('#section-entry .btn-go');
-  btn.disabled = true;
-  btn.textContent = '查询中...';
+  setBtnLoading(btn, '查询中...');
   try {
     const resp = await fetch(`/api/player/lookup?name=${encodeURIComponent(name)}`);
     const data = await resp.json();
     if (!data.ok) {
       document.getElementById('entry-err').textContent = data.message || '未找到玩家';
       document.getElementById('entry-err').classList.remove('hidden');
-      btn.disabled = false;
-      btn.textContent = '进入';
+      resetBtn(btn);
       return;
     }
     document.getElementById('section-entry').classList.add('hidden');
@@ -230,8 +238,7 @@ async function enterHome() {
     await loadHome();
   } catch (e) {
     console.error('enterHome error:', e);
-    btn.disabled = false;
-    btn.textContent = '进入';
+    resetBtn(btn);
     document.getElementById('entry-err').textContent = '网络异常，请稍后重试';
     document.getElementById('entry-err').classList.remove('hidden');
   }
@@ -290,17 +297,20 @@ function renderHome(data) {
   }
 }
 
-function joinBattle(bid) {
+async function joinBattle(bid) {
   battleId = bid;
   currentBattleId = bid;
   document.getElementById('section-home').classList.add('hidden');
   document.getElementById('section-battle').classList.remove('hidden');
-  refreshAll();
+  await refreshAll();
 }
 
 function viewReplay(bid) {
+  const btn = document.querySelector(`button[onclick="viewReplay('${bid}')"]`);
+  if (btn) setBtnLoading(btn, '加载中...');
+  setTimeout(() => { if (btn) resetBtn(btn); }, 500);
   console.log('viewReplay:', bid);
-  // TODO: Phase 2 实现战斗回顾详情
+  showError('战斗回顾功能开发中');
 }
 
 // ═══════════════════════════════════════
@@ -440,8 +450,7 @@ function updateConfirmBtn() {
 async function confirmDeck() {
   if (selectedCards.length !== 8) return;
   const btn = document.getElementById('btn-confirm-deck');
-  btn.disabled = true;
-  btn.textContent = '确认中...';
+  setBtnLoading(btn, '确认中...');
   try {
     const resp = await fetch('/api/player/select-deck', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -449,8 +458,7 @@ async function confirmDeck() {
     });
     const data = await resp.json();
     if (!data.ok) {
-      btn.disabled = false;
-      btn.textContent = '确认牌库';
+      resetBtn(btn);
       showError(data.message || '确认牌库失败，请重试');
       return;
     }
@@ -466,8 +474,7 @@ async function confirmDeck() {
     }
   } catch (e) {
     console.error('confirmDeck error:', e);
-    btn.disabled = false;
-    btn.textContent = '确认牌库';
+    resetBtn(btn);
     showError('网络异常，请稍后重试');
   }
 }
@@ -499,21 +506,35 @@ async function loadBattleSubmit(data) {
 async function submitCard() {
   const cardId = document.getElementById('card-select').value;
   if (!cardId) return;
-  const resp = await fetch('/api/player/submit-card', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({player_name:playerName, battle_id:battleId, round_number:0, card_id:cardId})
-  });
-  const data = await resp.json();
-  if (!data.ok) { showError(data.detail || data.message || '提交失败'); return; }
-  if (data.status === 'waiting_for_opponent') {
-    document.getElementById('card-select').disabled = true;
-    document.getElementById('btn-submit-card').disabled = true;
-    document.getElementById('waiting-msg').classList.remove('hidden');
-    document.getElementById('waiting-msg').textContent = '⏳ 已提交，等待对手中...';
-    await refreshAll();
-    startPolling(2000);
-  } else {
-    await refreshAll();
+  const btn = document.getElementById('btn-submit-card');
+  setBtnLoading(btn, '提交中...');
+  document.getElementById('card-select').disabled = true;
+  try {
+    const resp = await fetch('/api/player/submit-card', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({player_name:playerName, battle_id:battleId, round_number:0, card_id:cardId})
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      resetBtn(btn);
+      document.getElementById('card-select').disabled = false;
+      showError(data.detail || data.message || '提交失败');
+      return;
+    }
+    if (data.status === 'waiting_for_opponent') {
+      btn.textContent = '已提交';
+      document.getElementById('waiting-msg').classList.remove('hidden');
+      document.getElementById('waiting-msg').textContent = '⏳ 本回合已提交，等待对手中...';
+      await refreshAll();
+      startPolling(2000);
+    } else {
+      await refreshAll();
+    }
+  } catch (e) {
+    console.error('submitCard error:', e);
+    resetBtn(btn);
+    document.getElementById('card-select').disabled = false;
+    showError('网络异常，请稍后重试');
   }
 }
 

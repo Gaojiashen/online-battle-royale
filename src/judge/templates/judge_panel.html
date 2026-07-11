@@ -50,6 +50,16 @@
 const BASE = 'CB6XbtkLaafJnYsDL8RcHFpEnDg';
 const API = '/api/battle/init-from-base';
 
+function setBtnLoading(btn, text) {
+  btn._origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = text;
+}
+function resetBtn(btn) {
+  btn.disabled = false;
+  if (btn._origText) btn.textContent = btn._origText;
+}
+
 async function loadPending() {
   const div = document.getElementById('pending');
   div.innerHTML = '<span class="loading">加载中...</span>';
@@ -74,6 +84,8 @@ async function loadPending() {
 }
 
 async function triggerBattle(recordId, nameA, nameB) {
+  const btn = document.querySelector(`button[onclick="triggerBattle('${recordId}','${nameA}','${nameB}')"]`);
+  if (btn) setBtnLoading(btn, '发起中...');
   const result = document.getElementById('result');
   result.className = 'result';
   result.style.display = 'block';
@@ -97,12 +109,15 @@ async function triggerBattle(recordId, nameA, nameB) {
     result.className = 'result err';
     result.innerHTML = '错误: '+e.message;
   }
+  if (btn) resetBtn(btn);
 }
 
 async function manualStart() {
   const a = document.getElementById('pa').value.trim();
   const b = document.getElementById('pb').value.trim();
   if (!a || !b) { alert('请填写两个玩家名称'); return; }
+  const btn = document.querySelector('button[onclick="manualStart()"]');
+  if (btn) setBtnLoading(btn, '发起中...');
   const result = document.getElementById('result');
   result.className = 'result';
   result.style.display = 'block';
@@ -125,6 +140,7 @@ async function manualStart() {
     result.className = 'result err';
     result.innerHTML = '错误: '+e.message;
   }
+  if (btn) resetBtn(btn);
 }
 
 loadPending();
