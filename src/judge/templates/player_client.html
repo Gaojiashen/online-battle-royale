@@ -160,22 +160,37 @@ async function enterBattle() {
   if (!name) return;
   playerName = name;
 
-  const resp = await fetch(`/api/player/lookup?name=${encodeURIComponent(name)}`);
-  const data = await resp.json();
-  if (!data.ok) {
-    document.getElementById('entry-err').textContent = data.message || '未找到玩家';
+  const btn = document.querySelector('#section-entry .btn-go');
+  btn.disabled = true;
+  btn.textContent = '查询中...';
+  try {
+    const resp = await fetch(`/api/player/lookup?name=${encodeURIComponent(name)}`);
+    const data = await resp.json();
+    if (!data.ok) {
+      document.getElementById('entry-err').textContent = data.message || '未找到玩家';
+      document.getElementById('entry-err').classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = '进入战斗';
+      return;
+    }
+    if (!data.has_battle) {
+      document.getElementById('entry-err').textContent = '暂无进行中的战斗，等法官发起后再来';
+      document.getElementById('entry-err').classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = '进入战斗';
+      return;
+    }
+    battleId = data.battle_id;
+    document.getElementById('section-entry').classList.add('hidden');
+    document.getElementById('section-battle').classList.remove('hidden');
+    await refreshAll();
+  } catch (e) {
+    console.error('enterBattle error:', e);
+    btn.disabled = false;
+    btn.textContent = '进入战斗';
+    document.getElementById('entry-err').textContent = '网络异常，请稍后重试';
     document.getElementById('entry-err').classList.remove('hidden');
-    return;
   }
-  if (!data.has_battle) {
-    document.getElementById('entry-err').textContent = '暂无进行中的战斗，等法官发起后再来';
-    document.getElementById('entry-err').classList.remove('hidden');
-    return;
-  }
-  battleId = data.battle_id;
-  document.getElementById('section-entry').classList.add('hidden');
-  document.getElementById('section-battle').classList.remove('hidden');
-  await refreshAll();
 }
 
 // ═══════════════════════════════════════
