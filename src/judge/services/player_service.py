@@ -154,13 +154,14 @@ async def get_available_cards(name: str) -> dict:
         fields = r.get("fields", {})
         if fields.get("对战ID") == battle_id and fields.get("玩家侧") == side:
             cid = fields.get("卡牌ID", "")
+            card = CARDS_BY_ID.get(cid)
             cards.append({
                 "card_id": cid,
-                "name": fields.get("卡牌名称", ""),
-                "category": fields.get("类别", ""),
-                "aspect": fields.get("性相", ""),
-                "level_requirement": 0,
-                "effect_text": "",
+                "name": card.name if card else fields.get("卡牌名称", ""),
+                "category": card.category if card else fields.get("类别", ""),
+                "aspect": card.aspect if card else fields.get("性相", ""),
+                "level_requirement": card.level_requirement if card else 0,
+                "effect_text": card.effect_text if card else "",
                 "selected": cid in selected_ids if deck_locked else False,
             })
 
