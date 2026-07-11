@@ -72,6 +72,18 @@
   .error-bar { background:rgba(244,67,54,0.15); border:1px solid #F44336; padding:10px 16px; border-radius:6px; color:#F44336; font-size:14px; margin-bottom:14px; }
   .info-bar { background:rgba(33,150,243,0.15); border:1px solid #2196F3; padding:10px 16px; border-radius:6px; color:#90CAF9; font-size:14px; margin-bottom:14px; }
 
+  /* Home */
+  .battle-row { display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid #2a2a44; }
+  .battle-row:last-child { border-bottom:none; }
+  .battle-row .binfo { flex:1; }
+  .battle-row .bname { font-weight:600; }
+  .battle-row .bmeta { font-size:12px; color:#888; margin-top:2px; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+  .badge-win { background:rgba(76,175,80,0.2); color:#4CAF50; }
+  .badge-lose { background:rgba(244,67,54,0.2); color:#F44336; }
+  .badge-draw { background:rgba(255,152,0,0.2); color:#FF9800; }
+  .badge-active { background:rgba(33,150,243,0.2); color:#64B5F6; }
+
   .deck-grid { display:flex; flex-wrap:wrap; gap:6px; }
   .deck-card { background:#2a2a44; border:1px solid #3a3a55; border-radius:6px; padding:6px 8px; font-size:12px; min-width:80px; flex:1; max-width:120px; }
   .deck-card .dc-id { color:#888; font-size:10px; }
@@ -90,8 +102,26 @@
   <h1>&#9876; 战斗仪表盘</h1>
   <p class="sub">密教模拟器S2</p>
   <input id="input-name" type="text" placeholder="输入你的玩家名称" autofocus>
-  <button class="btn btn-go" onclick="enterBattle()">进入战斗</button>
+  <button class="btn btn-go" onclick="enterHome()">进入</button>
   <div id="entry-err" class="err hidden"></div>
+</div>
+
+<!-- ========== Home ========== -->
+<div id="section-home" class="hidden">
+  <div class="card">
+    <h3 id="home-title"></h3>
+  </div>
+  <div class="card">
+    <h3>&#9876; 进行中的战斗</h3>
+    <div id="active-battles"><div style="color:#666;">暂无进行中的战斗</div></div>
+  </div>
+  <div class="card">
+    <h3>&#128218; 历史战斗</h3>
+    <div id="finished-battles"><div style="color:#666;">暂无历史战斗</div></div>
+  </div>
+  <div class="footer">
+    <button class="btn btn-sm btn-outline" onclick="location.reload()">退出</button>
+  </div>
 </div>
 
 <!-- ========== Error bar ========== -->
@@ -176,7 +206,7 @@ function now() { return new Date().toLocaleTimeString(); }
 // ═══════════════════════════════════════
 // Entry
 // ═══════════════════════════════════════
-async function enterBattle() {
+async function enterHome() {
   const name = document.getElementById('input-name').value.trim();
   if (!name) return;
   playerName = name;
@@ -191,27 +221,84 @@ async function enterBattle() {
       document.getElementById('entry-err').textContent = data.message || '未找到玩家';
       document.getElementById('entry-err').classList.remove('hidden');
       btn.disabled = false;
-      btn.textContent = '进入战斗';
+      btn.textContent = '进入';
       return;
     }
-    if (!data.has_battle) {
-      document.getElementById('entry-err').textContent = '暂无进行中的战斗，等法官发起后再来';
-      document.getElementById('entry-err').classList.remove('hidden');
-      btn.disabled = false;
-      btn.textContent = '进入战斗';
-      return;
-    }
-    battleId = data.battle_id;
     document.getElementById('section-entry').classList.add('hidden');
-    document.getElementById('section-battle').classList.remove('hidden');
-    await refreshAll();
+    document.getElementById('section-home').classList.remove('hidden');
+    await loadHome();
   } catch (e) {
-    console.error('enterBattle error:', e);
+    console.error('enterHome error:', e);
     btn.disabled = false;
-    btn.textContent = '进入战斗';
+    btn.textContent = '进入';
     document.getElementById('entry-err').textContent = '网络异常，请稍后重试';
     document.getElementById('entry-err').classList.remove('hidden');
   }
+}
+
+async function loadHome() {
+  try {
+    const resp = await fetch(`/api/player/${encodeURIComponent(playerName)}/battles`);
+    const data = await resp.json();
+    if (!data.ok) { showError('获取战斗列表失败'); return; }
+    renderHome(data);
+  } catch (e) {
+    showError('加载主页失败: ' + e.message);
+  }
+}
+
+function renderHome(data) {
+  document.getElementById('home-title').textContent = `⚔ ${data.player_name} 的战斗主页`;
+
+  // Active battles
+  const active = data.active || [];
+  const activeDiv = document.getElementById('active-battles');
+  if (active.length === 0) {
+    activeDiv.innerHTML = '<div style="color:#666;">暂无进行中的战斗</div>';
+  } else {
+    activeDiv.innerHTML = active.map(b => {
+      const stateLabel = b.state === '对战中' ? '对战中' : '选牌中';
+      return `<div class="battle-row">
+        <div class="binfo">
+          <div class="bname">vs ${b.opponent||'?'}</div>
+          <div class="bmeta"><span class="badge badge-active">${stateLabel}</span> · 回合${b.total_rounds||0} · ${b.created_at||''}</div>
+        </div>
+        <button class="btn btn-go btn-sm" onclick="joinBattle('${b.battle_id}')">进入战斗</button>
+      </div>`;
+    }).join('');
+  }
+
+  // Finished battles
+  const finished = data.finished || [];
+  const finishedDiv = document.getElementById('finished-battles');
+  if (finished.length === 0) {
+    finishedDiv.innerHTML = '<div style="color:#666;">暂无历史战斗</div>';
+  } else {
+    finishedDiv.innerHTML = finished.map(b => {
+      let badgeCls = 'badge-draw';
+      if (b.result === '胜利') badgeCls = 'badge-win';
+      else if (b.result === '失败') badgeCls = 'badge-lose';
+      return `<div class="battle-row">
+        <div class="binfo">
+          <div class="bname">vs ${b.opponent||'?'}</div>
+          <div class="bmeta"><span class="badge ${badgeCls}">${b.result}</span> · ${b.total_rounds||0}回合 · ${b.created_at||''}</div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="viewReplay('${b.battle_id}')">查看回顾</button>
+      </div>`;
+    }).join('');
+  }
+}
+
+function joinBattle(bid) {
+  battleId = bid;
+  document.getElementById('section-home').classList.add('hidden');
+  document.getElementById('section-battle').classList.remove('hidden');
+  refreshAll();
+}
+
+function viewReplay(bid) {
+  console.log('viewReplay:', bid);
+  // TODO: Phase 2 实现战斗回顾详情
 }
 
 // ═══════════════════════════════════════
