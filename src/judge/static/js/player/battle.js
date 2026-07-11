@@ -23,10 +23,10 @@ async function refreshAll() {
     document.getElementById('battle-end').classList.toggle('hidden', !finished);
     document.getElementById('battle-logs').classList.toggle('hidden', !inBattle && !finished);
 
-    if (inDeckPhase) await loadAvailableCards();
+    if (inDeckPhase) await loadAvailableCards(false);
     if (inBattle) await loadBattleSubmit(data);
     if (finished) renderEndScreen(data);
-    if (inBattle || finished) await loadBattleLogs();
+    if (inBattle || finished) await loadBattleLogs(false);
 
     if (inDeckPhase && data.deck_confirmed) {
       document.getElementById('confirmed-deck-area').classList.remove('hidden');
@@ -100,8 +100,10 @@ function renderDeckCards(containerId, cards, showEffect) {
 // ═══════════════════════════════════════
 // Deck selection
 // ═══════════════════════════════════════
-async function loadAvailableCards() {
-  document.getElementById('card-list').innerHTML = '<div style="color:#888;text-align:center;padding:20px;">加载中...</div>';
+async function loadAvailableCards(showLoading = true) {
+  if (showLoading) {
+    document.getElementById('card-list').innerHTML = '<div style="color:#888;text-align:center;padding:20px;">加载中...</div>';
+  }
   try {
     const resp = await fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/available-cards?battle_id=${encodeURIComponent(PlayerState.currentBattleId)}`);
     const data = await resp.json();
@@ -249,8 +251,10 @@ function renderEndScreen(data) {
 // ═══════════════════════════════════════
 // Battle logs
 // ═══════════════════════════════════════
-async function loadBattleLogs() {
-  document.getElementById('logs-body').innerHTML = '<div style="color:#888;text-align:center;padding:12px;">加载中...</div>';
+async function loadBattleLogs(showLoading = true) {
+  if (showLoading) {
+    document.getElementById('logs-body').innerHTML = '<div style="color:#888;text-align:center;padding:12px;">加载中...</div>';
+  }
   try {
     const resp = await fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/battle-logs?battle_id=${encodeURIComponent(PlayerState.currentBattleId)}`);
     const data = await resp.json();

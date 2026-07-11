@@ -79,10 +79,19 @@ async def lookup_player(name: str) -> dict:
 # ════════════════════════════════════════════════════
 
 async def get_player_battles(name: str) -> dict:
-    """获取玩家所有对战列表（活跃 + 已完成）"""
+    """获取玩家所有对战列表（活跃 + 已完成）— 一次扫描 TABLE_BATTLE"""
     # 1. 查 TABLE_PLAYER_STATE 中该玩家的所有记录
-    records = await feishu_client.list_records(BASE_TOKEN, TABLE_PLAYER_STATE)
-    my_records = [r for r in records if r.get("fields", {}).get("玩家名称") == name]
+    player_records = await feishu_client.list_records(BASE_TOKEN, TABLE_PLAYER_STATE)
+    my_records = [r for r in player_records if r.get("fields", {}).get("玩家名称") == name]
+
+    # 2. 扫描 TABLE_BATTLE 一次，建立 battle_id → fields 索引
+    battle_records = await feishu_client.list_records(BASE_TOKEN, TABLE_BATTLE)
+    battle_index = {}
+    for br in battle_records:
+        bf = br.get("fields", {})
+        bid = bf.get("对战ID", "")
+        if bid:
+            battle_index[bid] = bf
 
     active = []
     finished = []
@@ -91,17 +100,14 @@ async def get_player_battles(name: str) -> dict:
         fields = r.get("fields", {})
         battle_id = fields.get("对战ID", "")
         side = fields.get("玩家侧", "")
-
-        battle = await _get_battle_record(battle_id)
-        if not battle:
+        bf = battle_index.get(battle_id)
+        if not bf:
             continue
 
-        bf = battle.get("fields", {})
         opponent = bf.get("玩家B名称", "") if side == "A" else bf.get("玩家A名称", "")
         state = bf.get("状态", "")
         winner_name = bf.get("胜者", "") or ""
 
-        # result 语义：从玩家视角判断胜负
         if state != "已结束":
             result = "进行中"
         elif not winner_name or winner_name == "平局":
@@ -118,7 +124,7 @@ async def get_player_battles(name: str) -> dict:
             "state": state,
             "result": result,
             "winner": winner_name,
-            "total_rounds": _int_field(battle, "当前回合", 0),
+            "total_rounds": _int_field({"fields": bf}, "当前回合", 0),
             "created_at": bf.get("创建时间", ""),
         }
 

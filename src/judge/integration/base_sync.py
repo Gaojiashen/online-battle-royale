@@ -276,24 +276,25 @@ class BaseSync:
         player_name: str,
         cards: List[Dict[str, str]],
     ):
-        """写入玩家可用牌列表"""
+        """写入玩家可用牌列表（批量写入）"""
         if not self.enabled:
             return
         try:
-            for c in cards:
-                await feishu_client.add_record(
-                    self.base_token,
-                    TABLE_AVAILABLE_CARDS,
-                    {
-                        "对战ID": battle_id,
-                        "玩家侧": side,
-                        "卡牌ID": c["id"],
-                        "卡牌名称": c["name"],
-                        "类别": c["category"],
-                        "性相": c["aspect"],
-                    },
-                )
-            logger.info(f"Base同步: {player_name}({side}) 可用牌 {len(cards)} 张已写入")
+            records = [
+                {
+                    "对战ID": battle_id,
+                    "玩家侧": side,
+                    "卡牌ID": c["id"],
+                    "卡牌名称": c["name"],
+                    "类别": c["category"],
+                    "性相": c["aspect"],
+                }
+                for c in cards
+            ]
+            count = await feishu_client.batch_add_records(
+                self.base_token, TABLE_AVAILABLE_CARDS, records
+            )
+            logger.info(f"Base同步: {player_name}({side}) 可用牌 {count} 张已批量写入")
         except Exception as e:
             logger.error(f"Base同步失败 (available_cards): {e}")
 

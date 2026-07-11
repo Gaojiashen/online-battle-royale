@@ -117,6 +117,28 @@ class FeishuClient:
             raise RuntimeError(f"新增记录失败: {data}")
         return data
 
+    async def batch_add_records(self, app_token: str, table_id: str,
+                                 records: List[Dict[str, Any]],
+                                 batch_size: int = 100) -> int:
+        """批量新增记录，自动分批。返回成功写入的总数。"""
+        total = 0
+        client = await self._get_client()
+        headers = await self._headers()
+
+        for i in range(0, len(records), batch_size):
+            batch = records[i:i + batch_size]
+            body = {"records": [{"fields": f} for f in batch]}
+            resp = await client.post(
+                f"{self.BASE_URL}/bitable/v1/apps/{app_token}/tables/{table_id}/records/batch_create",
+                headers=headers,
+                json=body,
+            )
+            data = resp.json()
+            if data.get("code") != 0:
+                raise RuntimeError(f"批量新增记录失败 (offset={i}): {data}")
+            total += len(batch)
+        return total
+
 
 # 全局单例
 feishu_client = FeishuClient()
