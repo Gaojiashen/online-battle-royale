@@ -1,22 +1,29 @@
-# ARCHITECTURE.md — 密教模拟器S2 战斗裁判引擎
+# ARCHITECTURE.md — 密教模拟器S2 在线沙盒后端
 
 ## 1. 项目目标
 
 **密教模拟器S2** 是一个以"飞升竞赛"为核心的多人共享世界在线沙盒游戏。
 
-本项目（`src/judge/`）是其中的**战斗裁判引擎**——整个游戏后端中唯一已实现的服务。
-项目边界明确：
+本项目（`src/judge/`）是该游戏的**唯一后端服务**。当前已实现模块：
 
-- **本项目负责**：PvP 对战管理、RPS 结算、飞书 Base 双向同步
-- **本项目不负责**：世界模拟、NPC 交互、探索系统、飞升仪式、物品管理、玩家账户
+- **PvP 战斗裁判引擎**：对战管理、RPS 结算、飞书 Base 双向同步
+- **Player Panel（玩家面板）**：玩家登录后的主入口，通过浏览器 HTML 页面访问
 
-战斗裁判引擎是一个独立部署的 FastAPI 服务，负责：
+未来计划模块（不在此服务之外另建后端）：
+
+- 背包系统、成就系统、探索系统、飞升仪式、NPC 交互等
+
+当前项目边界：
+
+- **已实现**：PvP 对战管理（完整生命周期）、RPS 结算引擎、资源流转、飞书 Base 同步、玩家面板（HTML+JS）、法官面板
+- **未实现**：世界模拟、NPC 交互、探索系统、飞升仪式、物品管理、玩家账户
+
+这是一个独立部署的 FastAPI 服务，负责：
 
 - 管理 PvP 对战生命周期（创建、组牌、回合提交、结算、终止）
 - 执行回合制 RPS（石头剪刀布）同时结算
 - 与飞书多维表格（Base）双向同步战斗状态
-
-玩家通过飞书 Base 选牌/出牌，飞书 Workflow 自动触发 webhook 调用本服务，本服务结算后写回 Base。
+- 为玩家提供 Web 面板进行选牌、出牌、战斗回顾
 
 ---
 
@@ -75,6 +82,43 @@
 └─────────────────────────────────────────────────┘
 ```
 
+---
+### Player Panel（玩家面板 — 2026-07-11 新增）
+
+```
+┌─────────────────────────────────────────────────┐
+│           Player Panel（玩家入口页面）             │
+│  /player → player_client.html                   │
+│                                                  │
+│  ┌──────────────────────────────────────────┐   │
+│  │  输入姓名 → 进入玩家主页（section-home）    │   │
+│  │                                           │   │
+│  │  ├─ 玩家信息                              │   │
+│  │  ├─ 进行中的战斗 → [进入战斗]               │   │
+│  │  └─ 历史战斗 → [查看回顾]（开发中）          │   │
+│  └──────────────────────────────────────────┘   │
+│                  ↓ 进入战斗                       │
+│  ┌──────────────────────────────────────────┐   │
+│  │  Battle Dashboard（战斗仪表盘）            │   │
+│  │  section-battle                           │   │
+│  │                                           │   │
+│  │  ├─ 选牌阶段（battle-deck）                │   │
+│  │  ├─ 战斗阶段（battle-submit）              │   │
+│  │  ├─ 结束画面（battle-end）                 │   │
+│  │  └─ 战斗记录（battle-logs）                │   │
+│  └──────────────────────────────────────────┘   │
+│                                                  │
+│  未来扩展：背包、成就、属性面板等 section-*          │
+└─────────────────────────────────────────────────┘
+```
+
+**设计原则：**
+- Player Panel 是玩家进入游戏后的**主入口**，不再是单纯的对战页面
+- Battle Dashboard 是 Player Panel 的**子模块**，通过 `section-battle` 区域承载
+- 当前 `playerName` 是玩家身份标识（全局变量），所有 API 调用基于 `playerName` + `currentBattleId`
+- 未来新模块在 Player Panel 中追加独立的 `section-*`，不应扩展 `section-battle`
+
+---
 ### 对战完整流程
 
 ```
@@ -219,6 +263,26 @@ onling-battle-royale/
 
 ### 4.3 Routes（`routes/`）
 
+**Player Panel 路由**（`routes/player_client.py` — 新增模块）：
+
+| Endpoint | Method | 功能 | 调用方 |
+|---|---|---|---|
+| `/player` | GET | 玩家面板HTML页面 | 玩家浏览器 |
+| `/api/player/lookup` | GET | 查找玩家信息 | 玩家面板JS |
+| `/api/player/{name}/battles` | GET | 玩家所有对战列表（活跃+已完成） | 玩家面板JS |
+| `/api/player/{name}/battle` | GET | 玩家视角战斗状态（支持 `?battle_id=`） | 玩家面板JS |
+| `/api/player/{name}/available-cards` | GET | 玩家可用卡牌列表（支持 `?battle_id=`） | 玩家面板JS |
+| `/api/player/select-deck` | POST | 玩家确认8张牌选择 | 玩家面板JS |
+| `/api/player/submit-card` | POST | 玩家提交本回合出牌 | 玩家面板JS |
+| `/api/player/{name}/battle-logs` | GET | 玩家视角战斗日志（支持 `?battle_id=`） | 玩家面板JS |
+
+**Judge Panel 路由**（`routes/judge_panel.py`）：
+
+| `/judge` | GET | 法官操作面板HTML页面 | 法官浏览器 |
+| `/api/judge/pending` | GET | 读取Base待发起记录 | 法官面板JS |
+
+**Battle 路由**（`routes/battle.py` — 对战核心 API）：
+
 | Endpoint | Method | 功能 | 调用方 |
 |---|---|---|---|
 | `/` | GET | 健康检查，返回服务名+卡牌数 | 任何 |
@@ -230,10 +294,19 @@ onling-battle-royale/
 | `/api/battle/webhook` | POST | 接收Base自动化触发的选牌提交 | Workflow |
 | `/api/battle/{battle_id}/status` | GET | 查询对战状态 | 调试/Base |
 | `/api/battle/{battle_id}/history` | GET | 获取完整战斗记录 | 调试 |
-| `/judge` | GET | 法官操作面板HTML页面 | 法官浏览器 |
-| `/api/judge/pending` | GET | 读取Base待发起记录 | 法官面板JS |
 
-### 4.4 Integration（`integration/`）
+### 4.4 Player Panel 模块扩展原则
+
+Player Panel 是所有玩家功能的**统一入口**。新增玩家系统模块时须遵循：
+
+1. **独立 `section-*`**：每个新模块（背包、成就、属性等）在 `player_client.html` 中拥有独立的 `section-<module-name>` HTML 区域，通过显示/隐藏切换
+2. **独立 API 路由前缀**：新模块 API 使用 `/api/player/<module>/*` 格式，避免污染 `/api/player/{name}/battle` 等现有路由
+3. **独立 service 函数文件**：`services/` 目录下新增模块对应的 service 文件（如 `services/inventory_service.py`），不与 `player_service.py` 混合
+4. **共享状态最小化**：`playerName` 是唯一全局标识符，各模块通过 `playerName` 查找自己的数据，不共享其他模块状态
+5. **Base 表隔离**：新模块如需 Base 表格，在 `base_sync.py` 或新模块中定义独立的 `TABLE_*` 常量
+6. **不扩展 Battle Dashboard**：战斗相关 UI 和 API 不再增加非战斗字段
+
+### 4.5 Integration（`integration/`）
 
 #### 4.4.1 `feishu_client.py` — 飞书客户端
 - 封装飞书 OpenAPI（tenant_access_token 认证）

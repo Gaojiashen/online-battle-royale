@@ -1,4 +1,4 @@
-# CLAUDE.md — 密教模拟器S2 战斗裁判开发规则
+# CLAUDE.md — 密教模拟器S2 在线沙盒后端开发规则
 
 > 本文档是 Claude 在本项目中的**开发规则**，不是业务介绍。
 > 修改代码前必须遵循本文档。
@@ -9,27 +9,47 @@
 
 ### 1.1 项目边界
 
-代码模块边界：
+**当前架构：Player Panel + Battle Engine**
 
-当前 src/judge/ 战斗裁判引擎不负责实现：
-- 世界模拟代码
-- NPC系统代码
-- 探索系统代码
-- 飞升系统代码
-- 物品管理代码
-- 玩家账户系统代码
+`src/judge/` 是整个游戏的**唯一后端服务**，不再是单纯的"战斗裁判引擎"。
 
-以上属于游戏设计层或其他服务模块，不应在本模块中实现。
+**已实现模块：**
+- PvP 战斗裁判引擎（完整生命周期 + RPS 结算 + 资源流转）
+- Player Panel（玩家面板 — `/player` HTML 页面，是玩家进入游戏后的主入口）
+- Judge Panel（法官面板 — `/judge` HTML 页面，用于发起对战）
+- 飞书 Base 双向同步
 
-注意：
-这些系统仍属于《密教模拟器 S2》整体游戏设计范围。
-当进行剧情、美术、规则设计讨论时，不受此代码边界限制。
+**Player Panel 是玩家主入口。** Battle Dashboard（选牌、出牌、战斗回顾）是 Player Panel 的**子模块**，通过 `section-battle` 区域承载。战斗不是全部内容。
+
+**未来模块（在 src/judge/ 内扩展）：**
+- 背包系统、成就系统、属性面板、探索、飞升仪式等
+
+**代码模块边界：**
+新增玩家功能模块时：
+- 在 `templates/player_client.html` 中新增独立的 `section-*` 区域
+- 在 `routes/` 中新增独立的路由文件（如 `routes/inventory.py`）
+- 在 `services/` 中新增独立业务模块（如 `services/inventory_service.py`）
+- **不要**在 `section-battle` 内追加非战斗 UI
+- **不要**在 `player_service.py`、`routes/player_client.py` 中追加非战斗业务逻辑
 
 ### 1.2 部署单元 = `src/judge/`
 
 本项目部署于 Render.com 的只是 `src/judge/` 目录。该目录之外的文件（`docs/`、`scripts/`、`.claude/`）不会部署到生产环境。
 
-### 1.3 分层架构
+### 1.3 Player Panel 模块化约束
+
+**Player Panel 是玩家进入游戏后的主入口，不是单纯的战斗页面。**
+
+新增玩家系统模块（背包、成就、属性等）时：
+
+1. **前端隔离**：在 `player_client.html` 中新建 `section-<module>` HTML 区域，通过 `classList.toggle('hidden')` 切换显示
+2. **路由隔离**：新建 `routes/<module>.py`，API 前缀使用 `/api/player/<module>/` 
+3. **业务隔离**：新建 `services/<module>_service.py`，不向 `player_service.py` 追加
+4. **模型隔离**：新建 `models/<module>_requests.py` 和 `models/<module>_responses.py`
+5. **共享状态**：`playerName` 是唯一全局标识符，通过它查找模块数据
+6. **禁止**：不得在 `section-battle`、`battle_service`、`battle_routes` 中追加非战斗功能
+
+### 1.4 分层架构
 
 ```
 routes/        ← 只处理 HTTP：解析请求、调用下层、返回响应
@@ -237,18 +257,26 @@ Routes 方法不超过 15 行（不含 docstring）。核心逻辑必须放在 `
 | 文件 | 职责 | 修改时注意 |
 |---|---|---|
 | `app.py` | FastAPI 入口 | 只改 startup/lifespan，不添加业务逻辑 |
+| **Player Panel** | | |
+| `templates/player_client.html` | 玩家面板（Player Panel 入口） | 新增模块用独立 `section-*`，不扩展 `section-battle` |
+| `routes/player_client.py` | 玩家面板 API（8个端点） | 新模块应新建路由文件，不在此追加 |
+| `services/player_service.py` | 玩家视角战斗查询 + 对战历史 | 新模块应新建 service 文件，不在此追加 |
+| `models/player_requests.py` | 玩家面板请求模型 | |
+| `models/player_responses.py` | 玩家面板响应模型 | |
+| **Battle Engine** | | |
 | `engine/card_library.py` | 48张卡牌定义 | 修改卡牌数据必须同步更新测试 |
-| `engine/rps_resolver.py` | RPS结算核心 | 约600行，修改结算逻辑风险最大 |
+| `engine/rps_resolver.py` | RPS结算核心 | ~600行，修改结算逻辑风险最大 |
 | `engine/resource_engine.py` | 6资源流转 | 修改资源规则必须更新内置测试 |
 | `engine/deck_validator.py` | 组牌校验 | DECK_SIZE=8 是常数 |
-| `engine/battle_manager.py` | 对战生命周期 | 状态机：initialized→deck_selection→in_progress→finished |
-| `routes/battle.py` | 对战API | 7个端点，不可删除 |
+| `engine/battle_manager.py` | 对战生命周期（内存状态机） | `session.battle_id` 是唯一关联键；`currentBattleId` 前端全局变量绑定当前战斗 |
+| **Routes** | | |
+| `routes/battle.py` | 对战核心API | 7个端点，不可删除 |
 | `routes/webhook.py` | Webhook处理 | 薄路由层，委托给 BattleManager |
 | `routes/judge_panel.py` | 法官面板 | 硬编码了 Base token 和表ID |
+| **Integration** | | |
 | `integration/feishu_client.py` | 飞书API | 全局单例，基于环境变量 |
 | `integration/base_sync.py` | Base同步 | 7张表，非阻塞异步 |
-| `models/requests.py` | 请求模型 | 5个 Pydantic 类 |
-| `models/responses.py` | 响应模型 | 8个 Pydantic 类 |
+| **Deploy** | | |
 | `render.yaml` | 部署配置 | 不要随意修改 buildCommand/startCommand |
 
 ## 8.分层规则
