@@ -75,6 +75,69 @@ async def lookup_player(name: str) -> dict:
 
 
 # ════════════════════════════════════════════════════
+# 玩家对战历史
+# ════════════════════════════════════════════════════
+
+async def get_player_battles(name: str) -> dict:
+    """获取玩家所有对战列表（活跃 + 已完成）"""
+    # 1. 查 TABLE_PLAYER_STATE 中该玩家的所有记录
+    records = await feishu_client.list_records(BASE_TOKEN, TABLE_PLAYER_STATE)
+    my_records = [r for r in records if r.get("fields", {}).get("玩家名称") == name]
+
+    active = []
+    finished = []
+
+    for r in my_records:
+        fields = r.get("fields", {})
+        battle_id = fields.get("对战ID", "")
+        side = fields.get("玩家侧", "")
+
+        battle = await _get_battle_record(battle_id)
+        if not battle:
+            continue
+
+        bf = battle.get("fields", {})
+        opponent = bf.get("玩家B名称", "") if side == "A" else bf.get("玩家A名称", "")
+        state = bf.get("状态", "")
+        winner_name = bf.get("胜者", "") or ""
+
+        # result 语义：从玩家视角判断胜负
+        if state != "已结束":
+            result = "进行中"
+        elif not winner_name or winner_name == "平局":
+            result = "平局"
+        elif winner_name == name:
+            result = "胜利"
+        else:
+            result = "失败"
+
+        entry = {
+            "battle_id": battle_id,
+            "opponent": opponent,
+            "my_side": side,
+            "state": state,
+            "result": result,
+            "winner": winner_name,
+            "total_rounds": _int_field(battle, "当前回合", 0),
+            "created_at": bf.get("创建时间", ""),
+        }
+
+        if state == "已结束":
+            finished.append(entry)
+        else:
+            active.append(entry)
+
+    finished.sort(key=lambda b: b["created_at"], reverse=True)
+
+    return {
+        "ok": True,
+        "player_name": name,
+        "active": active,
+        "finished": finished,
+    }
+
+
+# ════════════════════════════════════════════════════
 # 战斗状态（玩家视角）
 # ════════════════════════════════════════════════════
 

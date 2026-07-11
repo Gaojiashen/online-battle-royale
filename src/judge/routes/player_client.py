@@ -42,6 +42,12 @@ async def player_lookup(name: str = ""):
     return await player_service.lookup_player(name)
 
 
+@router.get("/api/player/{name}/battles")
+async def player_battles(name: str):
+    """获取玩家所有对战列表"""
+    return await player_service.get_player_battles(name)
+
+
 @router.get("/api/player/{name}/battle")
 async def player_battle(name: str, request: Request):
     """获取玩家视角的战斗状态"""
