@@ -291,19 +291,33 @@ function updateConfirmBtn() {
 }
 async function confirmDeck() {
   if (selectedCards.length !== 8) return;
-  const resp = await fetch('/api/player/select-deck', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({player_name:playerName, battle_id:battleId, card_ids:selectedCards})
-  });
-  const data = await resp.json();
-  if (!data.ok) { showError(data.message || '确认失败'); return; }
-  if (data.status === 'waiting_for_opponent') {
-    document.getElementById('btn-confirm-deck').disabled = true;
-    document.getElementById('btn-confirm-deck').textContent = '等待对手确认中...';
-    startPolling(3000);
-  } else {
-    stopPolling();
-    await refreshAll();
+  const btn = document.getElementById('btn-confirm-deck');
+  btn.disabled = true;
+  btn.textContent = '确认中...';
+  try {
+    const resp = await fetch('/api/player/select-deck', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({player_name:playerName, battle_id:battleId, card_ids:selectedCards})
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      btn.disabled = false;
+      btn.textContent = '确认牌库';
+      showError(data.message || '确认牌库失败，请重试');
+      return;
+    }
+    if (data.status === 'waiting_for_opponent') {
+      btn.textContent = '等待对手确认中...';
+      startPolling(3000);
+    } else {
+      stopPolling();
+      await refreshAll();
+    }
+  } catch (e) {
+    console.error('confirmDeck error:', e);
+    btn.disabled = false;
+    btn.textContent = '确认牌库';
+    showError('网络异常，请稍后重试');
   }
 }
 
