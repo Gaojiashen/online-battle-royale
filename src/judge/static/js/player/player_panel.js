@@ -60,6 +60,7 @@ function renderModules() {
 async function returnToPanel(btn) {
   if (btn) setBtnLoading(btn, '返回中...');
   stopPolling();
+  disconnectBattleWebSocket();
   PlayerState.clearBattle();
   document.getElementById('section-replay').classList.add('hidden');
   document.getElementById('section-battle').classList.add('hidden');

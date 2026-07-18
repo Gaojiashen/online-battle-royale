@@ -110,21 +110,9 @@ async def battle_init_from_base(req: InitFromBaseRequest, request: Request):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"初始化对战失败: {e}")
 
-    # 3. 写入Base
-    try:
-        await base_sync.sync_battle_init(result.battle_id, req.player_a_name,
-                                          req.player_b_name, aspects_a, aspects_b)
-        # 写入双方可用卡牌
-        a_cards = [{"id": c.id, "name": c.name, "category": c.category,
-                     "aspect": c.aspect} for c in result.player_a_available]
-        b_cards = [{"id": c.id, "name": c.name, "category": c.category,
-                     "aspect": c.aspect} for c in result.player_b_available]
-        await base_sync.sync_available_cards(
-            result.battle_id, "A", req.player_a_name, a_cards)
-        await base_sync.sync_available_cards(
-            result.battle_id, "B", req.player_b_name, b_cards)
-    except Exception as e:
-        logger.error(f"Base同步失败(非阻塞): {e}")
+    # 3. BattleManager.init_battle() 已 emit BATTLE_CREATED
+    #    PersistenceWorker 后台处理 sync_battle_init + sync_available_cards
+    #    不再阻塞 HTTP 响应等待 Base 写入
 
     # 4. 回写法官面板
     if req.battle_id:
@@ -170,10 +158,10 @@ async def battle_confirm_from_base(req: ConfirmFromBaseRequest, request: Request
     if len(cards) != 8:
         return {"ok": False, "message": f"需要8张牌，当前只选了{len(cards)}张"}
 
-    # 更新Base中的确认标记
-    asyncio.create_task(base_sync.sync_deck_confirmed(
+    # 更新Base中的确认标记（同步 await，与 select_deck 保持一致）
+    await base_sync.sync_deck_confirmed(
         battle_id=req.battle_id, side=req.side.upper(), deck=cards,
-    ))
+    )
 
     # 检查双方是否都确认了
     both_ready = await base_sync.check_both_decks_confirmed(req.battle_id)

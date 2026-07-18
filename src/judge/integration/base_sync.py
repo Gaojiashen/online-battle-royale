@@ -85,7 +85,8 @@ class BaseSync:
             logger.info(f"Base同步: 玩家状态已初始化")
 
         except Exception as e:
-            logger.error(f"Base同步失败 (init): {e}")
+            logger.error(f"Base同步失败 (init): battle={battle_id} error={e}")
+            raise
 
     async def sync_battle_started(self, battle_id: str):
         """对战开始（牌库确认后）"""
@@ -106,7 +107,8 @@ class BaseSync:
                     break
             logger.info(f"Base同步: 对战 {battle_id} 状态→对战中")
         except Exception as e:
-            logger.error(f"Base同步失败 (start): {e}")
+            logger.error(f"Base同步失败 (start): battle={battle_id} error={e}")
+            raise
 
     async def sync_round_result(
         self,
@@ -163,7 +165,8 @@ class BaseSync:
                 await self._sync_battle_round(battle_id, round_number)
 
         except Exception as e:
-            logger.error(f"Base同步失败 (round): {e}")
+            logger.error(f"Base同步失败 (round): battle={battle_id} round={round_number} error={e}")
+            raise
 
     async def _sync_battle_round(self, battle_id: str, round_number: int):
         """更新对战管理表的当前回合字段"""
@@ -246,7 +249,8 @@ class BaseSync:
             # 更新玩家状态中的已提交标记
             await self._set_submitted_flag(battle_id, side, True)
         except Exception as e:
-            logger.error(f"Base同步失败 (submission): {e}")
+            logger.error(f"Base同步失败 (submission): battle={battle_id} side={side} card={card_id} error={e}")
+            raise
 
     async def _set_submitted_flag(self, battle_id: str, side: str, submitted: bool):
         """更新玩家已提交标记"""
@@ -296,7 +300,8 @@ class BaseSync:
             )
             logger.info(f"Base同步: {player_name}({side}) 可用牌 {count} 张已批量写入")
         except Exception as e:
-            logger.error(f"Base同步失败 (available_cards): {e}")
+            logger.error(f"Base同步失败 (available_cards): battle={battle_id} side={side} error={e}")
+            raise
 
     async def sync_deck_confirmed(
         self,

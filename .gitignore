@@ -17,3 +17,6 @@ Thumbs.db
 
 # Temp
 *.xlsx
+
+# Runtime event/snapshot/DLQ data (Phase 2+)
+src/judge/data/

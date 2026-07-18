@@ -16,7 +16,7 @@ from models import (
     WebhookResponse, RoundLog,
     BattleStatusResponse, PlayerStateInfo, BattleHistoryResponse,
 )
-from integration.base_sync import base_sync
+from engine.events import BattleEvent, BattleEventType, EventBus, NullEventBus
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +64,9 @@ class BattleSession:
 class BattleManager:
     """对战管理器"""
 
-    def __init__(self):
+    def __init__(self, event_bus: EventBus = None):
         self._battles: Dict[str, BattleSession] = {}
+        self._events: EventBus = event_bus if event_bus is not None else NullEventBus()
 
     async def init_battle(self, req: BattleInitRequest) -> BattleInitResponse:
         """初始化对战"""
@@ -89,6 +90,21 @@ class BattleManager:
         )
 
         self._battles[battle_id] = session
+
+        # 发射事件 — 不等待任何副作用
+        self._events.emit(BattleEvent.create(
+            BattleEventType.BATTLE_CREATED,
+            battle_id=battle_id,
+            data={
+                "player_a_name": req.player_a_name,
+                "player_b_name": req.player_b_name,
+                "player_a_aspects": req.player_a_aspects,
+                "player_b_aspects": req.player_b_aspects,
+                "player_a_available": [c.id for c in a_available],
+                "player_b_available": [c.id for c in b_available],
+            },
+        ))
+
         # Base同步由调用方（init-from-base）处理
         return BattleInitResponse(
             battle_id=battle_id,
@@ -120,6 +136,19 @@ class BattleManager:
             state="deck_selection",
         )
         self._battles[battle_id] = session
+        self._events.emit(BattleEvent.create(
+            BattleEventType.BATTLE_RESTORED,
+            battle_id=battle_id,
+            data={
+                "player_a_name": player_a_name,
+                "player_b_name": player_b_name,
+                "player_a_aspects": player_a_aspects,
+                "player_b_aspects": player_b_aspects,
+                "restore_type": "light",
+                "current_round": 0,
+                "state": "deck_selection",
+            },
+        ))
         logger.info(f"Session 从Base恢复: {battle_id} ({player_a_name} vs {player_b_name})")
 
     def restore_full_session(
@@ -227,6 +256,19 @@ class BattleManager:
             session.resolver = RPSResolver(player_a_deck, player_b_deck)
 
         self._battles[battle_id] = session
+        self._events.emit(BattleEvent.create(
+            BattleEventType.BATTLE_RESTORED,
+            battle_id=battle_id,
+            data={
+                "player_a_name": player_a_name,
+                "player_b_name": player_b_name,
+                "player_a_aspects": player_a_aspects,
+                "player_b_aspects": player_b_aspects,
+                "restore_type": "full",
+                "current_round": current_round,
+                "state": state_str,
+            },
+        ))
         logger.info(f"Session 完整恢复: {battle_id} r={current_round} {player_a_name}(HP={state_a.hp}) vs {player_b_name}(HP={state_b.hp}) sub_a={submission_a} sub_b={submission_b}")
 
     async def confirm_deck(self, req: DeckConfirmRequest) -> DeckConfirmResponse:
@@ -275,9 +317,15 @@ class BattleManager:
         session.current_round = 1
         session.state = "in_progress"
 
-        # 异步同步到飞书Base
-        import asyncio
-        asyncio.create_task(base_sync.sync_battle_started(battle_id=req.battle_id))
+        self._events.emit(BattleEvent.create(
+            BattleEventType.DECK_CONFIRMED,
+            battle_id=req.battle_id,
+            data={
+                "player_a_deck": req.player_a_deck,
+                "player_b_deck": req.player_b_deck,
+                "current_round": 1,
+            },
+        ))
 
         return DeckConfirmResponse(
             battle_id=req.battle_id,
@@ -287,21 +335,21 @@ class BattleManager:
         )
 
     def submit_card(self, battle_id: str, side: str, card_id: str):
-        """玩家提交卡牌 → 返回 (WebhookResponse, Optional[Task], Optional[Task])"""
+        """玩家提交卡牌 → 返回 WebhookResponse"""
         session = self._battles.get(battle_id)
         if not session:
             return WebhookResponse(status="error",
-                                   message=f"对战 {battle_id} 状态丢失（服务可能已重启），请重新发起对战"), None, None
+                                   message=f"对战 {battle_id} 状态丢失（服务可能已重启），请重新发起对战")
 
         if session.state != "in_progress":
             return WebhookResponse(battle_id=battle_id, status="error",
-                                   message=f"对战不在进行中: {session.state}"), None, None
+                                   message=f"对战不在进行中: {session.state}")
 
         # 校验卡牌在牌库中
         deck = session.player_a_deck if side == "a" else session.player_b_deck
         if card_id not in deck:
             return WebhookResponse(battle_id=battle_id, status="error",
-                                   message=f"卡牌 {card_id} 不在本场牌库中"), None, None
+                                   message=f"卡牌 {card_id} 不在本场牌库中")
 
         # 存储提交
         player_name = session.player_a_name if side == "a" else session.player_b_name
@@ -310,17 +358,21 @@ class BattleManager:
         else:
             session.submission_b = card_id
 
-        # 提交持久化到 Base（创建 task 供调用方 await）
-        import asyncio
-        submission_task = asyncio.ensure_future(base_sync.sync_submission_made(
-            battle_id=battle_id, side=side,
-            player_name=player_name, card_id=card_id,
+        # 发射事件 — 不等待持久化
+        self._events.emit(BattleEvent.create(
+            BattleEventType.CARD_SUBMITTED,
+            battle_id=battle_id,
+            data={
+                "side": side,
+                "player_name": player_name,
+                "card_id": card_id,
+                "current_round": session.current_round,
+            },
         ))
 
         # 检查双方是否都提交了
         if session.submission_a and session.submission_b:
-            response, end_task = self._resolve_round(session)
-            return response, end_task, submission_task
+            return self._resolve_round(session)
 
         other_side = "b" if side == "a" else "a"
         return WebhookResponse(
@@ -328,10 +380,10 @@ class BattleManager:
             round=session.current_round,
             status="waiting_for_opponent",
             message=f"等待对手({other_side})提交",
-        ), None, submission_task
+        )
 
     def _resolve_round(self, session: BattleSession):
-        """结算当前回合 → 返回 (WebhookResponse, Optional[Task])"""
+        """结算当前回合 → 返回 WebhookResponse"""
         resolver = session.resolver
         state_a = session.state_a
         state_b = session.state_b
@@ -350,65 +402,88 @@ class BattleManager:
             session.submission_a = None
             session.submission_b = None
 
-            if result.battle_ended:
+            battle_ended = result.battle_ended
+            if battle_ended:
                 session.state = "finished"
                 session.winner = result.winner
                 session.end_reason = result.end_reason
             else:
                 session.current_round += 1
 
-            # 同步回合结果到飞书Base
-            import asyncio
-            state_a_dict = {
+            # 构建状态快照（供持久化使用）
+            state_a_snapshot = {
                 "hp": state_a.hp, "edge": state_a.edge,
                 "phantom": state_a.phantom, "charge": state_a.charge,
                 "chill": state_a.self_chill, "pulse": state_a.pulse,
                 "read": state_a.read, "insight": state_a.insight,
             } if state_a else None
-            state_b_dict = {
+            state_b_snapshot = {
                 "hp": state_b.hp, "edge": state_b.edge,
                 "phantom": state_b.phantom, "charge": state_b.charge,
                 "chill": state_b.self_chill, "pulse": state_b.pulse,
                 "read": state_b.read, "insight": state_b.insight,
             } if state_b else None
-            sync_coro = base_sync.sync_round_result(
-                battle_id=session.id,
-                round_number=result.round_number,
-                card_a_name=f"{result.card_a.id} {result.card_a.name}",
-                card_b_name=f"{result.card_b.id} {result.card_b.name}",
-                rps_description=result.rps_description,
-                damage_to_a=result.damage_to_a,
-                damage_to_b=result.damage_to_b,
-                hp_a_after=state_a.hp if state_a else 0,
-                hp_b_after=state_b.hp if state_b else 0,
-                special_events=list(result.special_events),
-                winner=result.winner,
-                battle_ended=result.battle_ended,
-                state_a=state_a_dict,
-                state_b=state_b_dict,
-            )
 
-            response = WebhookResponse(
+            # 发射 ROUND_RESOLVED 事件（PersistenceWorker 后台消费）
+            self._events.emit(BattleEvent.create(
+                BattleEventType.ROUND_RESOLVED,
+                battle_id=session.id,
+                data={
+                    "round_number": result.round_number,
+                    "card_a_id": result.card_a.id,
+                    "card_a_name": result.card_a.name,
+                    "card_b_id": result.card_b.id,
+                    "card_b_name": result.card_b.name,
+                    "rps_description": result.rps_description,
+                    "damage_to_a": result.damage_to_a,
+                    "damage_to_b": result.damage_to_b,
+                    "hp_a_after": state_a.hp if state_a else 0,
+                    "hp_b_after": state_b.hp if state_b else 0,
+                    "special_events": list(result.special_events),
+                    "battle_ended": battle_ended,
+                    "winner_side": result.winner,
+                    "state_a_snapshot": state_a_snapshot,
+                    "state_b_snapshot": state_b_snapshot,
+                },
+            ))
+
+            # 对战结束 → 额外触发 BATTLE_FINISHED
+            if battle_ended:
+                self._events.emit(BattleEvent.create(
+                    BattleEventType.BATTLE_FINISHED,
+                    battle_id=session.id,
+                    data={
+                        "winner": result.winner,
+                        "end_reason": result.end_reason,
+                        "final_round": result.round_number,
+                    },
+                ))
+
+            return WebhookResponse(
                 battle_id=session.id,
                 round=result.round_number,
                 status="resolved",
                 result=_round_to_log(result),
-                message="结算完成" if not result.battle_ended else f"战斗结束！胜者: {result.winner}",
+                message="结算完成" if not battle_ended else f"战斗结束！胜者: {result.winner}",
             )
-
-            # 统一返回 sync task 供调用方 await，确保 Base 在 HTTP 响应前已同步
-            return response, asyncio.create_task(sync_coro)
 
         except Exception as e:
             # 清除失败的提交
             session.submission_a = None
             session.submission_b = None
+
+            self._events.emit(BattleEvent.create(
+                BattleEventType.BATTLE_ERROR,
+                battle_id=session.id,
+                data={"context": "_resolve_round", "error": str(e)},
+            ))
+
             return WebhookResponse(
                 battle_id=session.id,
                 round=session.current_round,
                 status="error",
                 message=str(e),
-            ), None
+            )
 
     def get_status(self, battle_id: str) -> Optional[BattleStatusResponse]:
         """查询对战状态"""

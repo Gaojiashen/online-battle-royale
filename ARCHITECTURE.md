@@ -458,7 +458,7 @@ services:
     name: secret-edinburgh-judge
     env: python
     buildCommand: pip install -r src/judge/requirements.txt
-    startCommand: cd src/judge && uvicorn app:app --host 0.0.0.0 --port $PORT
+    startCommand: cd src/judge && uvicorn app:app --host 0.0.0.0 --port $PORT --ws-ping-interval 20 --ws-ping-timeout 10
 ```
 
 ### 环境变量
@@ -491,3 +491,4 @@ cd src/judge && python app.py
 - **无数据库**：所有对战状态存储在内存（`Dict[str, BattleSession]`），服务重启后丢失
 - **无认证**：所有API端点无鉴权，依赖 Render 内部网络隔离
 - **异步Base同步**：Base写操作使用 `asyncio.create_task()` 非阻塞执行，失败不影响对战流程
+- **单 Worker 部署**：WebSocketManager 基于进程内内存存储连接映射。**不支持 `uvicorn --workers > 1`**。如果未来需要多 worker，必须引入 Redis Pub/Sub 或外部消息层替代进程内 WebSocketManager。

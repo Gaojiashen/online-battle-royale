@@ -7,12 +7,20 @@ import sys
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from engine.card_library import ALL_CARDS, print_stats
 from engine.battle_manager import BattleManager
+from integration.event_bus import AsyncEventBus
+from integration.event_log import EventLog
+from integration.snapshot_store import SnapshotStore
+from integration.dead_letter import DeadLetterQueue
+from integration.websocket_manager import WebSocketManager
+from integration.persistence_worker import PersistenceWorker
+from integration.recovery import RecoveryManager
+from integration.base_sync import base_sync
 from routes.webhook import WebhookHandler
 
 logger = logging.getLogger(__name__)
@@ -30,15 +38,53 @@ async def lifespan(app: FastAPI):
     print_stats()
     print("=" * 50)
 
-    battle_manager = BattleManager()
-    webhook_handler = WebhookHandler(battle_manager)
+    # ── Phase 2: 存储层 ──
+    event_log = EventLog(data_dir="data/events")
+    snapshot_store = SnapshotStore(data_dir="data/snapshots")
+    dead_letter = DeadLetterQueue(
+        path="data/dead_letters/dead_letters.jsonl"
+    )
 
-    # 挂载到 app.state 供路由访问
+    # ── Phase 3: WebSocket 实时推送 ──
+    ws_manager = WebSocketManager()
+
+    # ── Phase 1: EventBus + PersistenceWorker ──
+    event_bus = AsyncEventBus(
+        queue_size=256,
+        event_log=event_log,
+        dead_letter_queue=dead_letter,
+        websocket_manager=ws_manager,
+    )
+    battle_manager = BattleManager(event_bus=event_bus)
+
+    # PersistenceWorker 注入 SnapshotStore + BattleManager（用于快照保存）
+    persistence_worker = PersistenceWorker(
+        base_sync,
+        snapshot_store=snapshot_store,
+        battle_manager=battle_manager,
+    )
+    persistence_worker.register(event_bus)
+
+    # ── Phase 2: 崩溃恢复（在 HTTP 服务启动前执行）──
+    recovery = RecoveryManager(battle_manager, snapshot_store, event_log)
+    recovered = recovery.recover_all_sessions()
+    if recovered > 0:
+        print(f"已恢复 {recovered} 个对战")
+
+    # ── 启动后台消费者 ──
+    await event_bus.start()
+
+    # ── 挂载到 app.state ──
+    webhook_handler = WebhookHandler(battle_manager)
     app.state.battle_manager = battle_manager
     app.state.webhook_handler = webhook_handler
+    app.state.ws_manager = ws_manager
+    app.state.event_bus = event_bus
 
     yield
 
+    # ── 优雅关闭 ──
+    await event_bus.stop()
     print("战斗裁判已关闭")
 
 
@@ -66,10 +112,12 @@ def create_app() -> FastAPI:
     from routes.battle import router as battle_router
     from routes.judge_panel import router as judge_router
     from routes.player_client import router as player_router
+    from routes.websocket import router as websocket_router
 
     app.include_router(battle_router)
     app.include_router(judge_router)
     app.include_router(player_router)
+    app.include_router(websocket_router)
 
     return app
 
@@ -87,8 +135,31 @@ async def root():
 
 
 @app.get("/health")
-async def health():
-    return {"ok": True, "status": "healthy"}
+async def health(request: Request):
+    """健康检查 — 包含运行时指标"""
+    bm = request.app.state.battle_manager
+    ws = request.app.state.ws_manager
+    bus = request.app.state.event_bus
+
+    # 统计活跃对战（非 finished）
+    active_count = sum(
+        1 for s in bm._battles.values() if s.state != "finished"
+    )
+
+    # 统计 WebSocket 连接总数
+    ws_total = sum(len(conns) for conns in ws._connections.values())
+
+    # 事件队列大小
+    queue_size = getattr(bus, '_queue', None)
+    queue_count = queue_size.qsize() if queue_size else 0
+
+    return {
+        "ok": True,
+        "status": "healthy",
+        "active_battles": active_count,
+        "ws_connections": ws_total,
+        "event_queue_size": queue_count,
+    }
 
 
 # ════════════════════════════════════════════════════
@@ -98,4 +169,5 @@ async def health():
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=port,
+                ws_ping_interval=20, ws_ping_timeout=10)

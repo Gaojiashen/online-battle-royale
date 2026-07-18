@@ -39,18 +39,14 @@ class WebhookHandler:
             return WebhookResponse(status="error",
                                    message=f"无效的 player_side: {payload.player_side}")
 
-        # 路由到 BattleManager
+        # 路由到 BattleManager（持久化由 PersistenceWorker 后台处理）
         try:
-            result, end_sync_task, submission_task = self.battle_manager.submit_card(
+            response = self.battle_manager.submit_card(
                 battle_id=payload.battle_id,
                 side=payload.player_side,
                 card_id=payload.selected_card,
             )
-            if submission_task is not None:
-                await submission_task
-            if end_sync_task is not None:
-                await end_sync_task
-            return result
+            return response
         except Exception as e:
             logger.exception(f"Webhook处理失败: {e}")
             return WebhookResponse(

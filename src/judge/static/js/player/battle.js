@@ -1,13 +1,129 @@
 // battle.js — Battle Dashboard: refresh, deck, submit, end screen, logs
 // 依赖: state.js, common/ui.js
+
+// ═══════════════════════════════════════
+// WebSocket (Phase 3: 实时推送)
+// ═══════════════════════════════════════
+let battleSocket = null;
+let wsConnected = false;
+let wsReconnectTimer = null;
+let wsPingInterval = null;
+let refreshSeq = 0;
+const WS_RECONNECT_DELAY = 5000;
+
+// ── beforeunload 保底清理 ──
+let _beforeunloadRegistered = false;
+if (!_beforeunloadRegistered) {
+  _beforeunloadRegistered = true;
+  window.addEventListener('beforeunload', function () {
+    disconnectBattleWebSocket();
+  });
+}
+
+function connectBattleWebSocket(battleId) {
+  if (battleSocket) { disconnectBattleWebSocket(); }
+  if (!battleId) return;
+
+  const protocol = location.protocol === "https:" ? "wss" : "ws";
+  const wsUrl = `${protocol}://${location.host}/ws/battle/${battleId}`;
+
+  try {
+    battleSocket = new WebSocket(wsUrl);
+  } catch (e) {
+    console.debug('[WS] create failed:', e.message);
+    startFallbackPolling();
+    return;
+  }
+
+  battleSocket.onopen = function () {
+    wsConnected = true;
+    console.debug('[WS] connected');
+    stopPolling();
+    // 每 30 秒发送 ping 保活（先清理旧的）
+    if (wsPingInterval) { clearInterval(wsPingInterval); }
+    wsPingInterval = setInterval(function () {
+      if (battleSocket && battleSocket.readyState === WebSocket.OPEN) {
+        battleSocket.send('ping');
+      } else {
+        if (wsPingInterval) { clearInterval(wsPingInterval); wsPingInterval = null; }
+      }
+    }, 30000);
+  };
+
+  battleSocket.onmessage = function (msg) {
+    try {
+      var event = JSON.parse(msg.data);
+      console.debug('[WS] message', event.type);
+      // 收到推送后调用 refreshAll 获取完整状态
+      refreshAll();
+    } catch (e) {
+      console.debug('[WS] parse error:', e.message);
+    }
+  };
+
+  battleSocket.onclose = function () {
+    wsConnected = false;
+    // 清理 ping timer
+    if (wsPingInterval) { clearInterval(wsPingInterval); wsPingInterval = null; }
+    // 防止 disconnect 后的 onclose 触发 reconnect
+    if (!battleSocket) { console.debug('[WS] close after disconnect, skip'); return; }
+    console.debug('[WS] closed, fallback to polling');
+    startFallbackPolling();
+    scheduleReconnect(battleId);
+  };
+
+  battleSocket.onerror = function () {
+    // onclose will fire after onerror, cleanup there
+    console.debug('[WS] error');
+  };
+}
+
+function disconnectBattleWebSocket() {
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+  if (wsPingInterval) {
+    clearInterval(wsPingInterval);
+    wsPingInterval = null;
+  }
+  if (battleSocket) {
+    var sock = battleSocket;  // 保存局部引用
+    battleSocket = null;      // 先置空，onclose 检查时会跳过
+    sock.onclose = null;
+    sock.close();
+  }
+  wsConnected = false;
+}
+
+function scheduleReconnect(battleId) {
+  if (wsReconnectTimer) return;
+  console.debug('[WS] reconnect in ' + (WS_RECONNECT_DELAY / 1000) + 's');
+  wsReconnectTimer = setTimeout(function () {
+    wsReconnectTimer = null;
+    if (!wsConnected && PlayerState.currentBattleId) {
+      connectBattleWebSocket(PlayerState.currentBattleId);
+    }
+  }, WS_RECONNECT_DELAY);
+}
+
+function startFallbackPolling() {
+  // 根据当前状态选择合适的 polling 间隔
+  // 简单起见用 3000ms，refreshAll 内部会调整
+  startPolling(3000);
+}
+
 // ═══════════════════════════════════════
 // Refresh
 // ═══════════════════════════════════════
 async function refreshAll() {
+  var currentSeq = ++refreshSeq;
   try {
     const resp = await fetch(`/api/player/${encodeURIComponent(PlayerState.playerName)}/battle-full?battle_id=${encodeURIComponent(PlayerState.currentBattleId)}`);
     if (!resp.ok) { showError('获取战斗状态失败'); return; }
     const data = await resp.json();
+    // 防止旧响应覆盖新状态（竞态保护）
+    if (currentSeq !== refreshSeq) { console.debug('[WS] ignore stale refresh #' + currentSeq); return; }
     PlayerState.currentState = data.state;
     PlayerState.mySide = data.my_side;
     document.getElementById('status-title').textContent = `⚔ ${PlayerState.playerName} 的 战场`;
@@ -36,6 +152,8 @@ async function refreshAll() {
     }
 
     stopPolling();
+    // WebSocket 连接时不启用 polling
+    if (wsConnected) return;
     if (inDeckPhase && data.deck_confirmed && !data.deck_locked) {
       startPolling(3000);
     } else if (inBattle && data.my_submitted_this_round) {

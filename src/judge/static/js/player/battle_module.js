@@ -5,6 +5,7 @@ const ERROR_HTML = '<div style="color:#F44336;text-align:center;padding:20px;">�
 
 function exitBattleModule() {
   stopPolling();
+  disconnectBattleWebSocket();
   document.getElementById('section-battle-module').classList.add('hidden');
 }
 
@@ -80,6 +81,8 @@ async function joinBattle(bid, btn) {
   PlayerState.setBattle(bid);
   document.getElementById('section-battle-module').classList.add('hidden');
   document.getElementById('section-battle').classList.remove('hidden');
+  // Phase 3: WebSocket 优先，polling 作为 fallback
+  connectBattleWebSocket(bid);
   try {
     await refreshAll();
   } catch (e) {
