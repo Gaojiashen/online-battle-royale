@@ -26,37 +26,48 @@ async def battle_init(req: BattleInitRequest, request: Request):
     bm = request.app.state.battle_manager
     pool = request.app.state.db_pool
 
-    # 如果 aspects 未提供，从 PG 查询
-    if not req.player_a_aspects or not req.player_b_aspects:
-        if pool is None:
-            raise HTTPException(status_code=503, detail="PostgreSQL connection unavailable – check DATABASE_URL")
-        for name_key, attr_key in [
-            (req.player_a_name, "player_a_aspects"),
-            (req.player_b_name, "player_b_aspects"),
-        ]:
-            if not getattr(req, attr_key):
-                row = await pool.fetchrow(
-                    "SELECT lantern, moth, forge, winter, heart, blade "
-                    "FROM players WHERE name = $1",
-                    name_key,
-                )
-                if row:
-                    setattr(req, attr_key, {
-                        "灯": row["lantern"], "蛾": row["moth"],
-                        "铸": row["forge"], "冬": row["winter"],
-                        "心": row["heart"], "刃": row["blade"],
-                    })
-                else:
-                    # 新玩家 — 默认性相等级 1
-                    setattr(req, attr_key, {
-                        "灯": 1, "蛾": 1, "铸": 1, "冬": 1, "心": 1, "刃": 1,
-                    })
-
     try:
+        # 如果 aspects 未提供，从 PG 查询
+        if not req.player_a_aspects or not req.player_b_aspects:
+            if pool is None:
+                raise HTTPException(status_code=503, detail="PostgreSQL connection unavailable – check DATABASE_URL")
+            for name_key, attr_key in [
+                (req.player_a_name, "player_a_aspects"),
+                (req.player_b_name, "player_b_aspects"),
+            ]:
+                if not getattr(req, attr_key):
+                    try:
+                        row = await pool.fetchrow(
+                            "SELECT lantern, moth, forge, winter, heart, blade "
+                            "FROM players WHERE name = $1",
+                            name_key,
+                        )
+                        if row:
+                            setattr(req, attr_key, {
+                                "灯": row["lantern"], "蛾": row["moth"],
+                                "铸": row["forge"], "冬": row["winter"],
+                                "心": row["heart"], "刃": row["blade"],
+                            })
+                        else:
+                            setattr(req, attr_key, {
+                                "灯": 1, "蛾": 1, "铸": 1, "冬": 1, "心": 1, "刃": 1,
+                            })
+                    except Exception as pg_err:
+                        logger.exception(f"PG lookup failed for {name_key}")
+                        setattr(req, attr_key, {
+                            "灯": 1, "蛾": 1, "铸": 1, "冬": 1, "心": 1, "刃": 1,
+                        })
+
         result = await bm.init_battle(req)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.exception("battle_init failed")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/api/battle/confirm-deck", response_model=DeckConfirmResponse)
 async def battle_confirm_deck(req: DeckConfirmRequest, request: Request):
     """
     法官确认双方8张牌已选好
@@ -117,3 +128,53 @@ async def battle_history(battle_id: str, request: Request):
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ════════════════════════════════════════════════════
+# 数据库诊断（临时 — 确认 migration 状态后删除）
+# ════════════════════════════════════════════════════
+
+REQUIRED_TABLES = [
+    "players", "battles", "battle_players",
+    "battle_rounds", "battle_submissions",
+]
+
+
+@router.get("/api/admin/db-status")
+async def db_status(request: Request):
+    pool = request.app.state.db_pool
+    if pool is None:
+        return {
+            "database_connected": False,
+            "tables": [],
+            "missing_tables": REQUIRED_TABLES,
+            "row_counts": {},
+        }
+
+    try:
+        rows = await pool.fetch(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' ORDER BY table_name"
+        )
+        existing = [r["table_name"] for r in rows]
+        missing = [t for t in REQUIRED_TABLES if t not in existing]
+
+        row_counts = {}
+        for t in existing:
+            cnt = await pool.fetchval(f"SELECT COUNT(*) FROM {t}")
+            row_counts[t] = cnt
+
+        return {
+            "database_connected": True,
+            "tables": existing,
+            "missing_tables": missing,
+            "row_counts": row_counts,
+        }
+    except Exception as e:
+        return {
+            "database_connected": True,
+            "tables": [],
+            "missing_tables": REQUIRED_TABLES,
+            "row_counts": {},
+            "error": str(e),
+        }
