@@ -47,8 +47,7 @@
 </div>
 
 <script>
-const BASE = 'CB6XbtkLaafJnYsDL8RcHFpEnDg';
-const API = '/api/battle/init-from-base';
+const API = '/api/battle/init';
 
 function setBtnLoading(btn, text) {
   btn._origText = btn.textContent;
@@ -67,7 +66,7 @@ async function loadPending() {
     const resp = await fetch('/api/judge/pending');
     const data = await resp.json();
     if (!data.records || data.records.length === 0) {
-      div.innerHTML = '<div class="empty">没有待发起的对战<br><small>在飞书Base「法官面板」新建一条记录吧</small></div>';
+      div.innerHTML = '<div class="empty">没有待发起的对战<br><small>使用下方表单手动发起</small></div>';
       return;
     }
     div.innerHTML = data.records.map(r =>
@@ -94,12 +93,12 @@ async function triggerBattle(recordId, nameA, nameB) {
     const resp = await fetch(API, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({base_token:BASE, player_a_name:nameA, player_b_name:nameB, battle_id:recordId})
+      body: JSON.stringify({player_a_name:nameA, player_b_name:nameB})
     });
     const data = await resp.json();
     if (data.ok) {
       result.className = 'result ok';
-      result.innerHTML = `对战创建成功！<br>Battle ID: <b>${data.battle_id}</b><br>${nameA}: ${data.player_a_available_count}张可用 · ${nameB}: ${data.player_b_available_count}张可用`;
+      result.innerHTML = `对战创建成功！<br>Battle ID: <b>${data.battle_id}</b><br>${nameA}: ${data.player_a_available?.length||0}张可用 · ${nameB}: ${data.player_b_available?.length||0}张可用`;
       loadPending();
     } else {
       result.className = 'result err';
@@ -126,12 +125,12 @@ async function manualStart() {
     const resp = await fetch(API, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({base_token:BASE, player_a_name:a, player_b_name:b, battle_id:''})
+      body: JSON.stringify({player_a_name:a, player_b_name:b})
     });
     const data = await resp.json();
     if (data.ok) {
       result.className = 'result ok';
-      result.innerHTML = `对战创建成功！<br>Battle ID: <b>${data.battle_id}</b><br>${a}: ${data.player_a_available_count}张 · ${b}: ${data.player_b_available_count}张`;
+      result.innerHTML = `对战创建成功！<br>Battle ID: <b>${data.battle_id}</b><br>${a}: ${data.player_a_available?.length||0}张 · ${b}: ${data.player_b_available?.length||0}张`;
     } else {
       result.className = 'result err';
       result.innerHTML = '失败: '+JSON.stringify(data);

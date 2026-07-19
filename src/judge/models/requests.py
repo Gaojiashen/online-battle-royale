@@ -10,13 +10,13 @@ from typing import Dict, List, Optional
 # ════════════════════════════════════════════════════
 
 class BattleInitRequest(BaseModel):
-    """创建对战请求"""
-    player_a_base_token: str = Field(..., description="玩家A的Base token")
-    player_b_base_token: str = Field(..., description="玩家B的Base token")
+    """创建对战请求 — aspects 可选，未提供时由后端从 players 表查询。"""
     player_a_name: str = Field(..., description="玩家A名称")
     player_b_name: str = Field(..., description="玩家B名称")
-    player_a_aspects: Dict[str, int] = Field(..., description="玩家A各性相等级 {'灯':4,'蛾':6}")
-    player_b_aspects: Dict[str, int] = Field(..., description="玩家B各性相等级")
+    player_a_base_token: str = Field(default="", description="玩家A Base token（已废弃，保留兼容）")
+    player_b_base_token: str = Field(default="", description="玩家B Base token（已废弃，保留兼容）")
+    player_a_aspects: Dict[str, int] = Field(default_factory=dict, description="玩家A性相等级")
+    player_b_aspects: Dict[str, int] = Field(default_factory=dict, description="玩家B性相等级")
 
 
 class DeckConfirmRequest(BaseModel):
@@ -24,21 +24,6 @@ class DeckConfirmRequest(BaseModel):
     battle_id: str = Field(..., description="对战ID")
     player_a_deck: List[str] = Field(..., min_length=8, max_length=8, description="A的8张牌ID")
     player_b_deck: List[str] = Field(..., min_length=8, max_length=8, description="B的8张牌ID")
-
-
-class InitFromBaseRequest(BaseModel):
-    """从Base面板发起对战请求（只需玩家名，API自动查性相等级）"""
-    base_token: str = Field(..., description="Base token")
-    player_a_name: str = Field(..., description="玩家A名称")
-    player_b_name: str = Field(..., description="玩家B名称")
-    battle_id: str = Field(default="", description="对战ID（workflow传record_id）")
-
-
-class ConfirmFromBaseRequest(BaseModel):
-    """从Base确认牌库请求"""
-    base_token: str = Field(..., description="Base token")
-    battle_id: str = Field(..., description="对战ID")
-    side: str = Field(..., description="玩家侧: a/b")
 
 
 class WebhookPayload(BaseModel):
