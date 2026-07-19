@@ -582,9 +582,9 @@ async def select_deck(player_name: str, battle_id: str,
         a_deck = _read_deck_slots(my_record) if side == "A" else _read_deck_slots(opp_record)
         b_deck = _read_deck_slots(opp_record) if side == "A" else _read_deck_slots(my_record)
 
-        if len(a_deck) != 8 or len(b_deck) != 8:
+        if len(a_deck) == 0 or len(b_deck) == 0 or len(a_deck) > DECK_SIZE or len(b_deck) > DECK_SIZE:
             return {"ok": False, "status": "error",
-                    "message": f"牌库不完整 A:{len(a_deck)} B:{len(b_deck)}"}
+                    "message": f"牌库数量无效 A:{len(a_deck)} B:{len(b_deck)}（需要 1-{DECK_SIZE} 张）"}
 
         # 5.5 如果 Session 因服务重启丢失，从 Base 重建
         if battle_id not in battle_manager._battles:

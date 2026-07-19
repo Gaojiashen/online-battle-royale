@@ -10,8 +10,8 @@ class SelectDeckRequest(BaseModel):
     player_name: str = Field(..., description="玩家名称")
     battle_id: str = Field(..., description="对战ID")
     card_ids: List[str] = Field(
-        ..., min_length=8, max_length=8,
-        description="选中的8张卡牌ID"
+        ..., min_length=1, max_length=8,
+        description="选中的卡牌（1-8张）"
     )
 
 

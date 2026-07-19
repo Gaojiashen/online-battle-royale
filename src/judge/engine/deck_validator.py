@@ -15,7 +15,7 @@ from engine.card_library import (
 )
 
 # 本场牌库大小
-DECK_SIZE = 8
+DECK_SIZE = 8  # 最大牌库数量（可选 1-8 张）
 
 # 所有性相列表
 ALL_ASPECTS = [ASPECT_BLADE, ASPECT_MOTH, ASPECT_FORGE, ASPECT_WINTER, ASPECT_HEART, ASPECT_LANTERN]
@@ -72,8 +72,10 @@ def validate_deck(selected_card_ids: List[str], aspect_levels: Dict[str, int]) -
     selected_cards = []
 
     # 检查数量
-    if len(selected_card_ids) != DECK_SIZE:
-        errors.append(f"必须正好选择 {DECK_SIZE} 张牌，当前选择了 {len(selected_card_ids)} 张")
+    if len(selected_card_ids) > DECK_SIZE:
+        errors.append(f"最多选择 {DECK_SIZE} 张牌，当前选择了 {len(selected_card_ids)} 张")
+    if len(selected_card_ids) == 0:
+        errors.append("至少选择 1 张牌")
 
     # 检查重复
     seen = set()

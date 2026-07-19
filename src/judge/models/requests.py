@@ -22,8 +22,8 @@ class BattleInitRequest(BaseModel):
 class DeckConfirmRequest(BaseModel):
     """确认牌库请求"""
     battle_id: str = Field(..., description="对战ID")
-    player_a_deck: List[str] = Field(..., min_length=8, max_length=8, description="A的8张牌ID")
-    player_b_deck: List[str] = Field(..., min_length=8, max_length=8, description="B的8张牌ID")
+    player_a_deck: List[str] = Field(..., min_length=1, max_length=8, description="A的牌库（1-8张）")
+    player_b_deck: List[str] = Field(..., min_length=1, max_length=8, description="B的牌库（1-8张）")
 
 
 class WebhookPayload(BaseModel):

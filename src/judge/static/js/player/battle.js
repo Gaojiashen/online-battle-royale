@@ -233,7 +233,7 @@ async function loadAvailableCards(showLoading = true) {
     const data = await resp.json();
     PlayerState.availableCardsData = data.cards;
     PlayerState.selectedCards = data.cards.filter(c => c.selected).map(c => c.card_id);
-    document.getElementById('deck-count').textContent = `已选择：${PlayerState.selectedCards.length} / 8`;
+    document.getElementById('deck-count').textContent = `已选择：${PlayerState.selectedCards.length} 张（最多 8 张）`;
     updateConfirmBtn();
 
     document.getElementById('card-list').innerHTML = data.cards.map(c => {
@@ -254,14 +254,14 @@ function toggleCard(cid, el) {
   const idx = PlayerState.selectedCards.indexOf(cid);
   if (idx >= 0) { PlayerState.selectedCards.splice(idx, 1); el.classList.remove('selected'); el.querySelector('.check').textContent = ''; }
   else if (PlayerState.selectedCards.length < 8) { PlayerState.selectedCards.push(cid); el.classList.add('selected'); el.querySelector('.check').textContent = '✓'; }
-  document.getElementById('deck-count').textContent = `已选择：${PlayerState.selectedCards.length} / 8`;
+  document.getElementById('deck-count').textContent = `已选择：${PlayerState.selectedCards.length} 张（最多 8 张）`;
   updateConfirmBtn();
 }
 function updateConfirmBtn() {
-  document.getElementById('btn-confirm-deck').disabled = (PlayerState.selectedCards.length !== 8);
+  document.getElementById('btn-confirm-deck').disabled = (PlayerState.selectedCards.length === 0);
 }
 async function confirmDeck() {
-  if (PlayerState.selectedCards.length !== 8) return;
+  if (PlayerState.selectedCards.length === 0 || PlayerState.selectedCards.length > 8) return;
   const btn = document.getElementById('btn-confirm-deck');
   setBtnLoading(btn, '确认中...');
   try {
@@ -378,7 +378,7 @@ function renderEndScreen(data) {
 function loadAvailableCardsInline(cards) {
   PlayerState.availableCardsData = cards;
   PlayerState.selectedCards = cards.filter(c => c.selected).map(c => c.card_id);
-  document.getElementById('deck-count').textContent = `已选择：${PlayerState.selectedCards.length} / 8`;
+  document.getElementById('deck-count').textContent = `已选择：${PlayerState.selectedCards.length} 张（最多 8 张）`;
   updateConfirmBtn();
   document.getElementById('card-list').innerHTML = cards.map(c => {
     const sel = PlayerState.selectedCards.includes(c.card_id);

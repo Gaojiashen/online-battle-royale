@@ -161,17 +161,29 @@ def test_deck_validation():
     """组牌合法性检查"""
     levels = {"灯": 4, "蛾": 6}
 
-    # 合法组牌
-    valid = ["C01", "C02", "C03", "C04", "M01", "M02", "L01", "L02"]
-    result = validate_deck(valid, levels)
+    # 合法组牌（1-8 张均可）
+    valid_8 = ["C01", "C02", "C03", "C04", "M01", "M02", "L01", "L02"]
+    result = validate_deck(valid_8, levels)
     assert result.is_valid == True, f"Should be valid: {result.errors}"
     print(f"  [OK] 合法8张牌组通过")
 
-    # 数量不足
-    result = validate_deck(["C01", "C02", "C03"], levels)
+    valid_3 = ["C01", "C02", "C03"]
+    result = validate_deck(valid_3, levels)
+    assert result.is_valid == True, f"Should be valid: {result.errors}"
+    print(f"  [OK] 合法3张牌组通过")
+
+    # 0 张牌无效
+    result = validate_deck([], levels)
     assert result.is_valid == False
-    assert "8" in result.errors[0]
-    print(f"  [OK] 数量不足正确拦截: {result.errors[0]}")
+    assert "至少" in result.errors[0]
+    print(f"  [OK] 0张牌正确拦截: {result.errors[0]}")
+
+    # 超过 8 张
+    too_many = ["C01", "C02", "C03", "C04", "C05", "C06", "M01", "M02", "M03"]
+    result = validate_deck(too_many, levels)
+    assert result.is_valid == False
+    assert "最多" in result.errors[0]
+    print(f"  [OK] 超8张正确拦截: {result.errors[0]}")
 
     # 超出等级
     too_high = ["C01", "C02", "C03", "C04", "C05", "C06", "L03", "L04"]  # L03/L04需要灯6
