@@ -1,33 +1,41 @@
 """
 玩家业务服务 — 用例编排层
 
-协调 engine（战斗逻辑）、integration（Base 读写）、models（数据结构）
+协调 engine（战斗逻辑）、PostgreSQL（持久化读写）、models（数据结构）
 完成玩家客户端所需的全部操作。
 """
-import os
+import json
 import logging
 from typing import Optional, List, Tuple
 
-from integration.feishu_client import feishu_client
-from integration.base_sync import base_sync
 from engine.card_library import ALL_CARDS, CARDS_BY_ID, get_card
 from engine.deck_validator import DECK_SIZE
+
+try:
+    import asyncpg  # noqa: F401
+    _asyncpg_available = True
+except ImportError:
+    asyncpg = None  # type: ignore
+    _asyncpg_available = False
 
 logger = logging.getLogger(__name__)
 
 # ════════════════════════════════════════════════════
-# 配置 (从环境变量读取，提供默认值)
+# PostgreSQL 连接池引用
 # ════════════════════════════════════════════════════
 
-BASE_TOKEN = os.environ.get("FEISHU_BASE_TOKEN", "CB6XbtkLaafJnYsDL8RcHFpEnDg")
+_pg_pool = None
 
-# 表ID — 与 base_sync.py 保持一致
-TABLE_PLAYERS = os.environ.get("TABLE_PLAYERS", "tbl4KaRcfiz1pZq1")
-TABLE_BATTLE = os.environ.get("TABLE_BATTLE", "tblWciOhRlFFEaSr")
-TABLE_PLAYER_STATE = os.environ.get("TABLE_PLAYER_STATE", "tblTNAkesS7WlJoR")
-TABLE_AVAILABLE = os.environ.get("TABLE_AVAILABLE", "tbl0DDzK6ckrqQah")
-TABLE_BATTLE_LOG = os.environ.get("TABLE_BATTLE_LOG", "tblyUL90LNC1Snb5")
-TABLE_SUBMISSION = os.environ.get("TABLE_SUBMISSION", "tblcmGlzO76H3RQt")
+
+def set_pg_read_pool(pool):
+    """由 app.py lifespan 调用，注入 PG 连接池。"""
+    global _pg_pool
+    _pg_pool = pool
+
+
+def _use_pg():
+    """检查 PG 连接池是否可用。"""
+    return _pg_pool is not None
 
 
 # ════════════════════════════════════════════════════
@@ -45,23 +53,14 @@ async def lookup_player(name: str) -> dict:
         battle_id = battle["fields"].get("对战ID", "")
         battle_state = await _get_battle_state(battle_id)
 
-    # 2. 查玩家表 → 获取性相（先试 tbl4KaRcfiz1pZq1 再试 tbl1NnOpplq3x7Rg）
+    # 2. 查玩家表 → 获取性相
     aspects = {}
     game_hp = 0
-    for table_id in (TABLE_PLAYERS, "tbl1NnOpplq3x7Rg"):
-        try:
-            records = await feishu_client.list_records(BASE_TOKEN, table_id)
-        except Exception:
-            continue
-        for r in records:
-            fields = r.get("fields", {})
-            found_name = fields.get("玩家名称", "") or fields.get("名称", "")
-            if found_name == name:
-                aspects = _extract_aspects(fields)
-                game_hp = fields.get("游戏HP", 0) or 0
-                break
-        if aspects:
-            break
+    if _use_pg():
+        player = await _get_player_from_pg(_pg_pool, name)
+        if player is not None:
+            aspects = _extract_aspects(player["fields"])
+            game_hp = player["fields"].get("游戏HP", 0) or 0
 
     return {
         "ok": True,
@@ -79,19 +78,21 @@ async def lookup_player(name: str) -> dict:
 # ════════════════════════════════════════════════════
 
 async def get_player_battles(name: str) -> dict:
-    """获取玩家所有对战列表（活跃 + 已完成）— 一次扫描 TABLE_BATTLE"""
-    # 1. 查 TABLE_PLAYER_STATE 中该玩家的所有记录
-    player_records = await feishu_client.list_records(BASE_TOKEN, TABLE_PLAYER_STATE)
-    my_records = [r for r in player_records if r.get("fields", {}).get("玩家名称") == name]
-
-    # 2. 扫描 TABLE_BATTLE 一次，建立 battle_id → fields 索引
-    battle_records = await feishu_client.list_records(BASE_TOKEN, TABLE_BATTLE)
+    """获取玩家所有对战列表（活跃 + 已完成）— PG JOIN 查询"""
+    my_records = []
     battle_index = {}
-    for br in battle_records:
-        bf = br.get("fields", {})
-        bid = bf.get("对战ID", "")
-        if bid:
-            battle_index[bid] = bf
+
+    # Phase 5.1-B: PG 优先（一次 JOIN）
+    if _use_pg():
+        pg_recs, pg_idx = await _get_player_battles_from_pg(_pg_pool, name)
+        if pg_recs:
+            my_records = pg_recs
+            # battle_index 从 pg_idx 转换格式以匹配旧代码
+            for bid, bi in pg_idx.items():
+                battle_index[bid] = bi["fields"]
+        else:
+            # PG 无数据，fall through to Feishu
+            pass
 
     active = []
     finished = []
@@ -148,61 +149,43 @@ async def get_player_battles(name: str) -> dict:
 # ════════════════════════════════════════════════════
 
 async def _restore_session_from_base(battle_id: str, battle_manager) -> bool:
-    """从 Base 读取数据并调用 restore_full_session 恢复 BattleSession。
-    返回 True 表示恢复成功，False 表示数据不足无法恢复。"""
+    """从 PG/Base 读取数据并调用 restore_full_session 恢复 BattleSession。
+    从 PG 恢复 BattleSession。返回 True 表示恢复成功。"""
     try:
-        # 1. 读 TABLE_BATTLE
-        battle_records = await feishu_client.list_records(BASE_TOKEN, TABLE_BATTLE)
         battle_record = None
-        for r in battle_records:
-            if r.get("fields", {}).get("对战ID") == battle_id:
-                battle_record = r
-                break
-        if not battle_record:
-            logger.warning(f"恢复失败: TABLE_BATTLE 中未找到 {battle_id}")
-            return False
-
-        # 2. 读 TABLE_PLAYER_STATE (A+B)
-        state_records = await feishu_client.list_records(BASE_TOKEN, TABLE_PLAYER_STATE)
         state_a = None
         state_b = None
-        for r in state_records:
-            f = r.get("fields", {})
-            if f.get("对战ID") == battle_id:
-                side = f.get("玩家侧", "")
-                if side == "A":
-                    state_a = r
-                elif side == "B":
-                    state_b = r
-        if not state_a or not state_b:
-            logger.warning(f"恢复失败: TABLE_PLAYER_STATE 数据不完整 A={state_a is not None} B={state_b is not None}")
-            return False
-
-        # 3. 读 TABLE_SUBMISSION 找最新提交
-        sub_records = await feishu_client.list_records(BASE_TOKEN, TABLE_SUBMISSION)
         sub_a = None
         sub_b = None
-        for r in sub_records:
-            f = r.get("fields", {})
-            if f.get("对战ID") == battle_id:
-                side = f.get("玩家侧", "")
-                card = f.get("选择的卡牌ID", "")
-                if side == "A":
-                    sub_a = card  # 最后一条覆盖
-                elif side == "B":
-                    sub_b = card
 
-        # 4. 调用 BattleManager 恢复
-        battle_manager.restore_full_session(
-            battle_id=battle_id,
-            battle_record=battle_record,
-            state_a_record=state_a,
-            state_b_record=state_b,
-            submission_a_card=sub_a,
-            submission_b_card=sub_b,
-        )
-        logger.info(f"Session {battle_id} 已从 Base 完整恢复")
-        return True
+        # Phase 5.1-B: PG 优先
+        if _use_pg():
+            battle_record = await _get_battle_from_pg(_pg_pool, battle_id)
+            state_a = await _get_player_state_from_pg(_pg_pool, battle_id, "A")
+            state_b = await _get_player_state_from_pg(_pg_pool, battle_id, "B")
+            pg_subs = await _get_submissions_from_pg(_pg_pool, battle_id)
+            for s in pg_subs:
+                f = s.get("fields", {})
+                sd = f.get("玩家侧", "")
+                card = f.get("选择的卡牌ID", "")
+                if sd == "A":
+                    sub_a = card
+                elif sd == "B":
+                    sub_b = card
+            if battle_record and state_a and state_b:
+                battle_manager.restore_full_session(
+                    battle_id=battle_id,
+                    battle_record=battle_record,
+                    state_a_record=state_a,
+                    state_b_record=state_b,
+                    submission_a_card=sub_a,
+                    submission_b_card=sub_b,
+                )
+                logger.info(f"Session {battle_id} 已从 PG 恢复")
+                return True
+
+        logger.warning(f"恢复失败: {battle_id} 数据不完整")
+        return False
     except Exception as e:
         logger.error(f"恢复 Session {battle_id} 失败: {e}")
         return False
@@ -227,10 +210,56 @@ async def get_player_battle(name: str, battle_manager=None, battle_id: str = "")
         battle_id = battle["fields"].get("对战ID", "")
         side = battle["fields"].get("玩家侧", "")
 
-    # 1.5 如果 Session 丢失（服务重启），尝试从 Base 恢复
+    # 1.5 如果 Session 丢失（服务重启），尝试恢复
     if battle_manager is not None and battle_id not in battle_manager._battles:
         await _restore_session_from_base(battle_id, battle_manager)
 
+    # ── 内存优先路径 ──
+    session = battle_manager._battles.get(battle_id) if battle_manager else None
+
+    if session and session.state_a and session.state_b:
+        is_a = (side == "A")
+        my_state = session.state_a if is_a else session.state_b
+        opp_state = session.state_b if is_a else session.state_a
+
+        my_hp = my_state.hp
+        opp_hp = opp_state.hp
+        my_resources = {
+            "edge": my_state.edge, "phantom": my_state.phantom,
+            "charge": my_state.charge, "chill": my_state.self_chill,
+            "pulse": my_state.pulse, "read": my_state.read,
+            "insight": my_state.insight,
+        }
+        sub = session.submission_a if is_a else session.submission_b
+        my_submitted = sub is not None
+        deck_confirmed = True
+        deck_locked = session.state != "deck_selection"
+        current_round = session.current_round
+        state_str = session.state
+        opponent = session.player_b_name if is_a else session.player_a_name
+        my_deck_ids = session.player_a_deck if is_a else session.player_b_deck
+        opp_deck_ids = session.player_b_deck if is_a else session.player_a_deck
+        winner = session.winner
+
+        return {
+            "ok": True,
+            "battle_id": battle_id,
+            "state": state_str,
+            "current_round": current_round,
+            "my_side": side,
+            "opponent_name": opponent,
+            "my_hp": my_hp,
+            "opponent_hp": opp_hp,
+            "my_resources": my_resources,
+            "my_deck": _deck_to_detail(my_deck_ids, include_effect=True),
+            "opponent_deck": _deck_to_detail(opp_deck_ids, include_effect=False),
+            "deck_confirmed": deck_confirmed,
+            "deck_locked": deck_locked,
+            "my_submitted_this_round": my_submitted,
+            "winner": winner or None,
+        }
+
+    # ── PG / Feishu fallback ──
     # 2. 从对战管理查回合/状态/胜者 + 对手名
     state_info = await _get_battle_record(battle_id)
     if state_info is None:
@@ -352,18 +381,14 @@ async def get_battle_full(name: str, battle_manager=None, battle_id: str = "") -
     my_deck = _deck_to_detail(my_deck_ids, include_effect=True)
     opp_deck = _deck_to_detail(opp_deck_ids, include_effect=False)
 
-    # 6. 可用卡牌（内存 session.available 或 Base）
+    # 6. 可用卡牌（内存 session.available 或实时计算）
     if session:
         avail_ids = session.player_a_available if side == "A" else session.player_b_available
         cards = [_card_summary(cid, cid in my_deck_ids if deck_locked else False) for cid in avail_ids]
     else:
-        cards = []
-        records = await feishu_client.list_records(BASE_TOKEN, TABLE_AVAILABLE)
-        for r in records:
-            f = r.get("fields", {})
-            if f.get("对战ID") == battle_id and f.get("玩家侧") == side:
-                cid = f.get("卡牌ID", "")
-                cards.append(_card_summary(cid, cid in my_deck_ids if deck_locked else False))
+        # Phase 5.1-B: 实时计算替代 TABLE_AVAILABLE 查询
+        avail_ids = await _get_available_card_ids(battle_id, side)
+        cards = [_card_summary(cid, cid in my_deck_ids if deck_locked else False) for cid in avail_ids]
 
     # 7. 战斗日志（内存或 Base）
     logs = []
@@ -388,7 +413,10 @@ async def get_battle_full(name: str, battle_manager=None, battle_id: str = "") -
                 "opponent_resource_logs": r.resource_logs_b if side == "A" else r.resource_logs_a,
             })
     else:
-        log_records = await feishu_client.list_records(BASE_TOKEN, TABLE_BATTLE_LOG)
+        # PG
+        log_records = []
+        if _use_pg():
+            log_records = await _get_battle_rounds_from_pg(_pg_pool, battle_id)
         for lr in log_records:
             f = lr.get("fields", {})
             if f.get("对战ID") == battle_id:
@@ -470,22 +498,20 @@ async def get_available_cards(name: str, battle_id: str = "") -> dict:
     deck_locked = _bool_field(my_record, "牌库已确认")
     selected_ids = _read_deck_slots(my_record)
 
-    records = await feishu_client.list_records(BASE_TOKEN, TABLE_AVAILABLE)
+    # Phase 5.1-B: 实时计算替代 TABLE_AVAILABLE 查询
+    avail_ids = await _get_available_card_ids(battle_id, side)
     cards = []
-    for r in records:
-        fields = r.get("fields", {})
-        if fields.get("对战ID") == battle_id and fields.get("玩家侧") == side:
-            cid = fields.get("卡牌ID", "")
-            card = CARDS_BY_ID.get(cid)
-            cards.append({
-                "card_id": cid,
-                "name": card.name if card else fields.get("卡牌名称", ""),
-                "category": card.category if card else fields.get("类别", ""),
-                "aspect": card.aspect if card else fields.get("性相", ""),
-                "level_requirement": card.level_requirement if card else 0,
-                "effect_text": card.effect_text if card else "",
-                "selected": cid in selected_ids if deck_locked else False,
-            })
+    for cid in avail_ids:
+        card = CARDS_BY_ID.get(cid)
+        cards.append({
+            "card_id": cid,
+            "name": card.name if card else cid,
+            "category": card.category if card else "",
+            "aspect": card.aspect if card else "",
+            "level_requirement": card.level_requirement if card else 0,
+            "effect_text": card.effect_text if card else "",
+            "selected": cid in selected_ids if deck_locked else False,
+        })
 
     return {
         "ok": True,
@@ -518,11 +544,32 @@ async def select_deck(player_name: str, battle_id: str,
         if cid not in valid_ids:
             return {"ok": False, "message": f"卡牌 {cid} 不在可用列表中"}
 
-    # 3. 写入 Base（牌位1-8 + 牌库已确认）
-    await base_sync.sync_deck_confirmed(battle_id, side, card_ids)
+    # 3. 写入 PG（牌位1-8 + 牌库已确认）
+    if not _use_pg():
+        return {"ok": False, "message": "数据库不可用，请稍后重试"}
+    try:
+        await _pg_pool.execute(
+            "UPDATE battle_players SET deck_slots = $1::jsonb, "
+            "deck_confirmed = TRUE, updated_at = NOW() "
+            "WHERE battle_id = $2 AND side = $3",
+            json.dumps(card_ids), battle_id, side,
+        )
+    except Exception:
+        logger.error(f"PG sync_deck_confirmed failed for {battle_id}/{side}", exc_info=True)
+        return {"ok": False, "message": "牌库写入失败，请稍后重试"}
 
-    # 4. 检查对手是否已确认
-    both_ready = await base_sync.check_both_decks_confirmed(battle_id)
+    # 4. 检查双方是否均已确认
+    both_ready = False
+    try:
+        rows = await _pg_pool.fetch(
+            "SELECT deck_confirmed FROM battle_players WHERE battle_id = $1",
+            battle_id,
+        )
+        both_ready = len(rows) >= 2 and all(r["deck_confirmed"] for r in rows)
+    except Exception:
+        logger.warning(
+            f"PG deck_confirmed check failed for {battle_id}", exc_info=True
+        )
 
     if both_ready:
         # 5. 从 Base 读取双方牌库
@@ -668,8 +715,10 @@ async def get_battle_logs(name: str, battle_manager=None, battle_id: str = "") -
             logs.sort(key=lambda x: x["round"])
             return {"ok": True, "battle_id": battle_id, "logs": logs}
 
-    # Base 回退：从 TABLE_BATTLE_LOG 读取并补全卡牌详情
-    records = await feishu_client.list_records(BASE_TOKEN, TABLE_BATTLE_LOG)
+    # PG
+    records = []
+    if _use_pg():
+        records = await _get_battle_rounds_from_pg(_pg_pool, battle_id)
     logs = []
     for r in records:
         fields = r.get("fields", {})
@@ -799,87 +848,336 @@ def _deck_to_detail(deck_ids: List[str], include_effect: bool = True) -> List[di
     return result
 
 
-async def _get_battle_state(battle_id: str) -> str:
-    record = await _get_battle_record(battle_id)
-    if record is None:
-        return ""
-    return record.get("fields", {}).get("状态", "")
-
-
 async def _get_battle_record(battle_id: str) -> Optional[dict]:
-    """从对战管理表查一条记录"""
-    records = await feishu_client.list_records(BASE_TOKEN, TABLE_BATTLE)
-    for r in records:
-        if r.get("fields", {}).get("对战ID") == battle_id:
-            return r
+    """从 battles 表查一条记录。"""
+    if _use_pg():
+        return await _get_battle_from_pg(_pg_pool, battle_id)
     return None
 
 
 async def _get_player_state_record(battle_id: str, side: str) -> Optional[dict]:
-    """从玩家战斗状态表查指定对战+侧的一条记录"""
-    records = await feishu_client.list_records(BASE_TOKEN, TABLE_PLAYER_STATE)
-    for r in records:
-        fields = r.get("fields", {})
-        if fields.get("对战ID") == battle_id and fields.get("玩家侧") == side:
-            return r
+    """从 battle_players 表查指定对战+侧的一条记录。"""
+    if _use_pg():
+        return await _get_player_state_from_pg(_pg_pool, battle_id, side)
     return None
 
 
 async def _find_player_in_battle(name: str, battle_id: str) -> Optional[dict]:
-    """查找玩家在指定对战中的记录（返回 TABLE_PLAYER_STATE 记录）"""
-    records = await feishu_client.list_records(BASE_TOKEN, TABLE_PLAYER_STATE)
-    for r in records:
-        fields = r.get("fields", {})
-        if fields.get("玩家名称") == name and fields.get("对战ID") == battle_id:
-            return r
+    """查找玩家在指定对战中的记录。"""
+    if _use_pg():
+        for side in ("A", "B"):
+            result = await _get_player_state_from_pg(_pg_pool, battle_id, side)
+            if result is not None and result.get("fields", {}).get("玩家名称") == name:
+                return result
     return None
 
 
 async def _find_player_battle(name: str) -> Optional[dict]:
-    """在玩家战斗状态表中查找玩家当前活跃的战斗（优先非结束状态）"""
-    records = await feishu_client.list_records(BASE_TOKEN, TABLE_PLAYER_STATE)
-    for r in records:
-        if r.get("fields", {}).get("玩家名称") == name:
-            # 检查对应对战是否已结束
+    """查找玩家当前活跃对战 — PG only。"""
+    if _use_pg():
+        recs, idx = await _get_player_battles_from_pg(_pg_pool, name)
+        for r in recs:
             bid = r["fields"].get("对战ID", "")
-            battle = await _get_battle_record(bid)
-            if battle and battle["fields"].get("状态", "") not in ("已结束", ""):
+            bi = idx.get(bid, {})
+            state = bi.get("fields", {}).get("状态", "")
+            if state not in ("已结束", ""):
                 return r
-    # 兜底：如果没有活跃对战，返回最近一条（已结束也能查看）
-    for r in records:
-        if r.get("fields", {}).get("玩家名称") == name:
-            return r
+        if recs:
+            return recs[0]
     return None
 
 
 async def _get_available_card_ids(battle_id: str, side: str) -> List[str]:
-    """获取指定对战+侧的全部可用卡牌ID"""
-    records = await feishu_client.list_records(BASE_TOKEN, TABLE_AVAILABLE)
-    return [r["fields"].get("卡牌ID", "")
-            for r in records
-            if (r.get("fields", {}).get("对战ID") == battle_id
-                and r.get("fields", {}).get("玩家侧") == side)]
+    """获取可用卡牌ID — 实时计算（替代 TABLE_AVAILABLE 查询）"""
+    # 从 battles 表读取性相 JSONB，通过 calculate_available 实时计算
+    from engine.deck_validator import calculate_available
+    record = await _get_battle_record(battle_id)
+    if record is None:
+        return []
+    fields = record.get("fields", {})
+    aspects_key = (
+        "玩家A性相等级" if side in ("A", "a") else "玩家B性相等级"
+    )
+    aspects_raw = fields.get(aspects_key, "{}")
+    if isinstance(aspects_raw, str):
+        try:
+            aspects = json.loads(aspects_raw)
+        except (json.JSONDecodeError, TypeError):
+            return []
+    elif isinstance(aspects_raw, dict):
+        aspects = aspects_raw
+    else:
+        return []
+    # ensure int values
+    aspects = {str(k): int(v) for k, v in aspects.items()}
+    cards = calculate_available(aspects)
+    return [c.id for c in cards]
 
 
 async def _has_submitted_this_round(battle_id: str, side: str,
                                     current_round: int, battle_manager=None) -> bool:
-    """检查指定侧在当前回合是否已提交 — 优先读 BattleManager 内存，回退 Base"""
+    """检查指定侧在当前回合是否已提交 — 内存 > PG > Feishu"""
     if current_round == 0:
         return False
 
-    # 优先查 BattleManager 内存（即时，无 Base 异步写入延迟）
+    # 优先 BattleManager 内存
     if battle_manager is not None:
         session = battle_manager._battles.get(battle_id)
         if session is not None:
             sub = session.submission_a if side.upper() == "A" else session.submission_b
             return sub is not None
 
-    # Base 回退（服务重启后 session 丢失时）
-    records = await feishu_client.list_records(BASE_TOKEN, TABLE_SUBMISSION)
-    for r in records:
-        fields = r.get("fields", {})
-        if (fields.get("对战ID") == battle_id
-                and fields.get("玩家侧") == side
-                and _int_field(r, "回合编号", 0) == current_round):
-            return True
+    # PG fallback
+    if _use_pg():
+        subs = await _get_submissions_from_pg(_pg_pool, battle_id, side.upper())
+        for s in subs:
+            if _int_field(s, "回合编号", 0) == current_round:
+                return True
     return False
+
+
+# ════════════════════════════════════════════════════════════════
+# Phase 5.1-B — PostgreSQL 查询辅助函数
+# 返回格式与现有 Feishu list_records 兼容。
+# 所有函数接受 pool 参数，pool=None 时返回 None/空列表。
+# 不改变现有业务函数调用路径。
+# ════════════════════════════════════════════════════════════════
+
+async def _get_player_from_pg(pool, name: str) -> Optional[dict]:
+    """查询玩家帐号 — 查询 players 表。
+    异常时返回 None（自动 fallback Feishu）。
+    """
+    if pool is None:
+        return None
+    try:
+        row = await pool.fetchrow(
+            "SELECT name, lantern, moth, forge, winter, heart, blade, game_hp "
+            "FROM players WHERE name = $1",
+            name,
+        )
+        if row is None:
+            return None
+        return {
+            "fields": {
+                "玩家名称": row["name"],
+                "灯": row["lantern"], "蛾": row["moth"],
+                "铸": row["forge"], "冬": row["winter"],
+                "心": row["heart"], "刃": row["blade"],
+                "游戏HP": row["game_hp"],
+            },
+        }
+    except Exception:
+        logger.warning(f"PG _get_player_from_pg failed for {name}", exc_info=True)
+        return None
+
+
+async def _get_battle_from_pg(pool, battle_id: str) -> Optional[dict]:
+    """查询对战元数据 — 异常时返回 None（自动 fallback Feishu）。"""
+    if pool is None:
+        return None
+    try:
+        row = await pool.fetchrow(
+            "SELECT battle_id, state, player_a_name, player_b_name, "
+            "player_a_aspects, player_b_aspects, current_round, winner, "
+            "end_reason, created_at "
+            "FROM battles WHERE battle_id = $1",
+            battle_id,
+        )
+        if row is None:
+            return None
+        return {
+            "fields": {
+                "对战ID": row["battle_id"],
+                "状态": row["state"],
+                "玩家A名称": row["player_a_name"],
+                "玩家B名称": row["player_b_name"],
+                "玩家A性相等级": (
+                    json.dumps(row["player_a_aspects"], ensure_ascii=False)
+                    if isinstance(row["player_a_aspects"], dict)
+                    else row["player_a_aspects"]
+                ),
+                "玩家B性相等级": (
+                    json.dumps(row["player_b_aspects"], ensure_ascii=False)
+                    if isinstance(row["player_b_aspects"], dict)
+                    else row["player_b_aspects"]
+                ),
+                "当前回合": row["current_round"],
+                "胜者": row["winner"] or "",
+                "创建时间": row["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+                if row["created_at"] else "",
+            },
+        }
+    except Exception:
+        logger.warning(f"PG _get_battle_from_pg failed for {battle_id}", exc_info=True)
+        return None
+
+
+async def _get_player_state_from_pg(pool, battle_id: str, side: str) -> Optional[dict]:
+    """查询玩家战斗状态 — 异常时返回 None（自动 fallback Feishu）。"""
+    if pool is None:
+        return None
+    try:
+        row = await pool.fetchrow(
+            "SELECT battle_id, side, player_name, hp, edge, phantom, charge, "
+            "chill, pulse, read, insight, deck_slots, deck_confirmed, submitted "
+            "FROM battle_players WHERE battle_id = $1 AND side = $2",
+            battle_id, side,
+        )
+        if row is None:
+            return None
+        fields = {
+            "对战ID": row["battle_id"], "玩家侧": row["side"],
+            "玩家名称": row["player_name"], "战HP": row["hp"],
+            "锋芒": row["edge"], "幻影": row["phantom"],
+            "蓄力": row["charge"], "寒意": row["chill"],
+            "脉动": row["pulse"], "洞悉": row["read"],
+            "看破": row["insight"],
+            "牌库已确认": row["deck_confirmed"],
+            "已提交": row["submitted"],
+        }
+        deck = row["deck_slots"] if isinstance(row["deck_slots"], list) else []
+        for i in range(1, 9):
+            fields[f"牌位{i}"] = deck[i - 1] if i <= len(deck) else ""
+        return {"fields": fields}
+    except Exception:
+        logger.warning(
+            f"PG _get_player_state_from_pg failed for {battle_id}/{side}",
+            exc_info=True,
+        )
+        return None
+
+
+async def _get_battle_rounds_from_pg(pool, battle_id: str) -> List[dict]:
+    """查询回合记录 — 异常时返回空列表（自动 fallback Feishu）。"""
+    if pool is None:
+        return []
+    try:
+        rows = await pool.fetch(
+            "SELECT battle_id, round_number, card_a_id, card_a_name, "
+            "card_b_id, card_b_name, rps_description, damage_to_a, damage_to_b, "
+            "hp_a_after, hp_b_after, special_events, winner_side "
+            "FROM battle_rounds WHERE battle_id = $1 ORDER BY round_number",
+            battle_id,
+        )
+        result = []
+        for row in rows:
+            se = row["special_events"]
+            special_str = "; ".join(se) if se else ""
+            result.append({
+                "fields": {
+                    "对战ID": row["battle_id"],
+                    "回合编号": row["round_number"],
+                    "A使用卡牌": (
+                        f"{row['card_a_id']} {row['card_a_name']}"
+                        if row["card_a_id"] and row["card_a_name"] else ""
+                    ),
+                    "B使用卡牌": (
+                        f"{row['card_b_id']} {row['card_b_name']}"
+                        if row["card_b_id"] and row["card_b_name"] else ""
+                    ),
+                    "RPS结果描述": row["rps_description"] or "",
+                    "A受到伤害": row["damage_to_a"],
+                    "B受到伤害": row["damage_to_b"],
+                    "A剩余HP": row["hp_a_after"] or 0,
+                    "B剩余HP": row["hp_b_after"] or 0,
+                    "特殊事件": special_str,
+                    "胜者": row["winner_side"] or "",
+                },
+            })
+        return result
+    except Exception:
+        logger.warning(
+            f"PG _get_battle_rounds_from_pg failed for {battle_id}", exc_info=True
+        )
+        return []
+
+
+async def _get_submissions_from_pg(
+    pool, battle_id: str, side: Optional[str] = None
+) -> List[dict]:
+    """查询提交记录 — 异常时返回空列表（自动 fallback Feishu）。"""
+    if pool is None:
+        return []
+    try:
+        if side:
+            rows = await pool.fetch(
+                "SELECT battle_id, side, player_name, card_id, round_number "
+                "FROM battle_submissions "
+                "WHERE battle_id = $1 AND side = $2 "
+                "ORDER BY created_at",
+                battle_id, side,
+            )
+        else:
+            rows = await pool.fetch(
+                "SELECT battle_id, side, player_name, card_id, round_number "
+                "FROM battle_submissions "
+                "WHERE battle_id = $1 "
+                "ORDER BY created_at",
+                battle_id,
+            )
+        return [
+            {
+                "fields": {
+                    "对战ID": row["battle_id"], "玩家侧": row["side"],
+                    "玩家名称": row["player_name"],
+                    "选择的卡牌ID": row["card_id"],
+                    "回合编号": row["round_number"],
+                },
+            }
+            for row in rows
+        ]
+    except Exception:
+        logger.warning(
+            f"PG _get_submissions_from_pg failed for {battle_id}", exc_info=True
+        )
+        return []
+
+
+async def _get_player_battles_from_pg(
+    pool, player_name: str
+) -> Tuple[List[dict], dict]:
+    """查询玩家所有对战 — 一次 JOIN 替代两次全表扫描。
+    异常时返回空（自动 fallback Feishu）。
+    """
+    if pool is None:
+        return [], {}
+    try:
+        rows = await pool.fetch(
+            "SELECT bp.battle_id, bp.side, bp.player_name, "
+            "b.state, b.player_a_name, b.player_b_name, "
+            "b.winner, b.current_round, b.created_at "
+            "FROM battle_players bp "
+            "JOIN battles b ON bp.battle_id = b.battle_id "
+            "WHERE bp.player_name = $1 "
+            "ORDER BY b.created_at DESC",
+            player_name,
+        )
+        player_records = []
+        battle_index = {}
+        for row in rows:
+            player_records.append({
+                "fields": {
+                    "对战ID": row["battle_id"],
+                    "玩家侧": row["side"],
+                    "玩家名称": row["player_name"],
+                },
+            })
+            if row["battle_id"] not in battle_index:
+                battle_index[row["battle_id"]] = {
+                    "fields": {
+                        "对战ID": row["battle_id"],
+                        "状态": row["state"],
+                        "玩家A名称": row["player_a_name"],
+                        "玩家B名称": row["player_b_name"],
+                        "胜者": row["winner"] or "",
+                        "当前回合": row["current_round"],
+                        "创建时间": row["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+                        if row["created_at"] else "",
+                    },
+                }
+        return player_records, battle_index
+    except Exception:
+        logger.warning(
+            f"PG _get_player_battles_from_pg failed for {player_name}", exc_info=True
+        )
+        return [], {}

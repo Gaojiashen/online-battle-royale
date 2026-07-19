@@ -1,6 +1,13 @@
+databases:
+  - name: onling-db
+    plan: free
+
 services:
   - type: web
     name: secret-edinburgh-judge
     env: python
     buildCommand: pip install -r src/judge/requirements.txt
     startCommand: cd src/judge && uvicorn app:app --host 0.0.0.0 --port $PORT --ws-ping-interval 20 --ws-ping-timeout 10
+    envVars:
+      - key: DATABASE_READ_ENABLED
+        value: true

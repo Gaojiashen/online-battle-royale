@@ -1,10 +1,10 @@
 """
 PersistenceWorker — 后台持久化消费者。
 
-订阅 BattleEvent，将状态变更异步写入飞书 Base。
+订阅 BattleEvent，将状态变更异步写入 PostgreSQL。
 所有 handler 返回 coroutine，由 AsyncEventBus 的消费者循环调度和 await。
 
-不感知 HTTP / WebSocket。只依赖 BaseSync 和 CARDS_BY_ID。
+不感知 HTTP / WebSocket。只依赖 Writer 接口和 CARDS_BY_ID。
 """
 
 import logging
@@ -13,7 +13,6 @@ from typing import Dict, Any, Set, Optional
 from engine.battle_manager import BattleManager
 from engine.events import BattleEvent, BattleEventType, EventBus
 from engine.card_library import CARDS_BY_ID
-from integration.base_sync import BaseSync
 from integration.snapshot_store import SnapshotStore
 
 logger = logging.getLogger(__name__)
@@ -24,7 +23,7 @@ class PersistenceWorker:
     持久化工作器。
 
     注册 7 种事件处理器到 EventBus。
-    每个 handler 接收 BattleEvent，返回 Coroutine（BaseSync 方法调用）。
+    每个 handler 接收 BattleEvent，返回 Coroutine（Writer 方法调用）。
     AsyncEventBus 的 _consume_loop 负责 await 这些 coroutine。
 
     去重机制：通过 event_id 防止 retry 导致的重复写入。
@@ -36,11 +35,11 @@ class PersistenceWorker:
 
     def __init__(
         self,
-        base_sync: BaseSync,
+        sync,
         snapshot_store: Optional[SnapshotStore] = None,
         battle_manager: Optional[BattleManager] = None,
     ):
-        self._base_sync = base_sync
+        self._sync = sync
         self._snapshots = snapshot_store
         self._bm = battle_manager
         self._processed_events: Set[str] = set()
@@ -67,7 +66,7 @@ class PersistenceWorker:
         顺序策略：先写独立数据（可用牌），最后写核心管理记录。
         确保中途失败时不会在 Base 中留下孤儿对战记录。
         """
-        if not self._base_sync.enabled:
+        if not self._sync.enabled:
             return
 
         # 去重
@@ -93,12 +92,12 @@ class PersistenceWorker:
                         "aspect": card.aspect,
                     })
             if cards:
-                await self._base_sync.sync_available_cards(
+                await self._sync.sync_available_cards(
                     event.battle_id, side, player_name, cards,
                 )
 
         # 2. 最后写入对战管理记录 + 玩家状态（核心数据）
-        await self._base_sync.sync_battle_init(
+        await self._sync.sync_battle_init(
             battle_id=event.battle_id,
             player_a_name=d["player_a_name"],
             player_b_name=d["player_b_name"],
@@ -125,7 +124,7 @@ class PersistenceWorker:
         if event.event_id in self._processed_events:
             logger.warning(f"Skip duplicate event: {event.event_id} type={event.type.value}")
             return
-        await self._base_sync.sync_battle_started(battle_id=event.battle_id)
+        await self._sync.sync_battle_started(battle_id=event.battle_id)
         self._processed_events.add(event.event_id)
         # 牌库锁定后保存快照
         self._save_snapshot(event)
@@ -136,7 +135,7 @@ class PersistenceWorker:
             logger.warning(f"Skip duplicate event: {event.event_id} type={event.type.value}")
             return
         d = event.data
-        await self._base_sync.sync_submission_made(
+        await self._sync.sync_submission_made(
             battle_id=event.battle_id,
             side=d["side"],
             player_name=d["player_name"],
@@ -150,7 +149,7 @@ class PersistenceWorker:
             logger.warning(f"Skip duplicate event: {event.event_id} type={event.type.value}")
             return
         d = event.data
-        await self._base_sync.sync_round_result(
+        await self._sync.sync_round_result(
             battle_id=event.battle_id,
             round_number=d["round_number"],
             card_a_name=f"{d['card_a_id']} {d['card_a_name']}",

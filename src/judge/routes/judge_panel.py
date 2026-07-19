@@ -6,8 +6,6 @@ import logging
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from integration.feishu_client import feishu_client
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -27,25 +25,27 @@ async def judge_panel():
 
 
 @router.get("/api/judge/pending")
-async def judge_pending():
-    """读取法官面板中待发起的记录"""
+async def judge_pending(request: Request):
+    """读取待发起的对战（state='initialized'）。"""
+    pool = request.app.state.db_pool
+    if pool is None:
+        return {"ok": True, "records": []}
+
     try:
-        records = await feishu_client.list_records(
-            "CB6XbtkLaafJnYsDL8RcHFpEnDg", "tblbheflCQ2wTgml"
+        rows = await pool.fetch(
+            "SELECT battle_id, player_a_name, player_b_name "
+            "FROM battles WHERE state = 'initialized' "
+            "ORDER BY created_at DESC"
         )
-        pending = []
-        for r in records:
-            fields = r.get("fields", {})
-            status = fields.get("状态", "")
-            # 处理单选字段返回数组的情况
-            if isinstance(status, list):
-                status = status[0] if status else ""
-            if status == "待发起":
-                pending.append({
-                    "record_id": r.get("record_id", ""),
-                    "player_a": fields.get("玩家A", ""),
-                    "player_b": fields.get("玩家B", ""),
-                })
+        pending = [
+            {
+                "record_id": row["battle_id"],
+                "player_a": row["player_a_name"],
+                "player_b": row["player_b_name"],
+            }
+            for row in rows
+        ]
         return {"ok": True, "records": pending}
     except Exception as e:
+        logger.error(f"judge_pending failed: {e}")
         return {"ok": False, "error": str(e)}

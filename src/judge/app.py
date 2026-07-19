@@ -11,6 +11,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+import asyncpg
+
 from engine.card_library import ALL_CARDS, print_stats
 from engine.battle_manager import BattleManager
 from integration.event_bus import AsyncEventBus
@@ -20,7 +22,8 @@ from integration.dead_letter import DeadLetterQueue
 from integration.websocket_manager import WebSocketManager
 from integration.persistence_worker import PersistenceWorker
 from integration.recovery import RecoveryManager
-from integration.base_sync import base_sync
+from integration.postgres_sync import PostgresSync
+from integration.persistence_writer import PostgresWriter
 from routes.webhook import WebhookHandler
 
 logger = logging.getLogger(__name__)
@@ -57,9 +60,26 @@ async def lifespan(app: FastAPI):
     )
     battle_manager = BattleManager(event_bus=event_bus)
 
-    # PersistenceWorker 注入 SnapshotStore + BattleManager（用于快照保存）
+    # ── Phase 5.1: PostgreSQL 持久化层 ──
+    DATABASE_URL = os.environ.get("DATABASE_URL", "")
+    db_pool = None
+    postgres_sync = PostgresSync(pool=None)  # pool=None → enabled=False
+    if DATABASE_URL:
+        try:
+            db_pool = await asyncpg.create_pool(
+                dsn=DATABASE_URL,
+                min_size=2,
+                max_size=10,
+            )
+            postgres_sync = PostgresSync(pool=db_pool)
+            print(f"PostgreSQL 连接池已就绪 (2–10)")
+        except Exception as e:
+            print(f"PostgreSQL 连接失败: {e}")
+
+    # ── PersistenceWorker → PostgresWriter → PostgreSQL ──
+    writer = PostgresWriter(postgres_sync=postgres_sync)
     persistence_worker = PersistenceWorker(
-        base_sync,
+        writer,
         snapshot_store=snapshot_store,
         battle_manager=battle_manager,
     )
@@ -80,10 +100,15 @@ async def lifespan(app: FastAPI):
     app.state.webhook_handler = webhook_handler
     app.state.ws_manager = ws_manager
     app.state.event_bus = event_bus
+    app.state.db_pool = db_pool
+    app.state.postgres_sync = postgres_sync
 
     yield
 
     # ── 优雅关闭 ──
+    if db_pool:
+        await db_pool.close()
+        print("PostgreSQL 连接池已关闭")
     await event_bus.stop()
     print("战斗裁判已关闭")
 
