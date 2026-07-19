@@ -84,6 +84,31 @@ async def lifespan(app: FastAPI):
     set_pg_read_pool(db_pool)
     print(f"player_service pool injected: {db_pool is not None}")
 
+    # ── 自动 migration（空库初始化）──
+    if db_pool:
+        try:
+            tables = await db_pool.fetch(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public'"
+            )
+            existing = {r["table_name"] for r in tables}
+            required = {"players", "battles", "battle_players",
+                        "battle_rounds", "battle_submissions"}
+            if not required.issubset(existing):
+                import os as _os
+                migration_path = _os.path.join(
+                    _os.path.dirname(_os.path.abspath(__file__)),
+                    "migrations", "001_init.sql",
+                )
+                with open(migration_path, encoding="utf-8") as f:
+                    sql = f.read()
+                await db_pool.execute(sql)
+                print(f"Migration executed: {len(required)} tables created")
+            else:
+                print(f"Migration skipped: all {len(required)} tables exist")
+        except Exception as e:
+            print(f"Migration failed: {e}")
+
     # ── PersistenceWorker → PostgresWriter → PostgreSQL ──
     writer = PostgresWriter(postgres_sync=postgres_sync)
     persistence_worker = PersistenceWorker(
