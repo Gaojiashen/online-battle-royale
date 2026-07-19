@@ -95,7 +95,7 @@ async def get_player_battles(name: str) -> dict:
             for bid, bi in pg_idx.items():
                 battle_index[bid] = bi["fields"]
         else:
-            # PG 无数据，fall through to Feishu
+            # PG 无数据
             pass
 
     active = []

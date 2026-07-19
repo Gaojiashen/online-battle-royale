@@ -103,7 +103,7 @@ async def test_postgres_sync():
                 "SELECT * FROM battles WHERE battle_id = $1", TEST_BATTLE_ID
             )
         assert battle is not None, "battles 表应有记录"
-        assert battle["state"] == "initialized"
+        assert battle["state"] == "已初始化"
         assert battle["player_a_name"] == "测试A"
         assert battle["player_b_aspects"] == {"铸": 5, "刃": 5}
         print(f"  ✓ sync_battle_init — battles 表 OK")
@@ -127,7 +127,7 @@ async def test_postgres_sync():
                 "SELECT state, current_round FROM battles WHERE battle_id = $1",
                 TEST_BATTLE_ID,
             )
-        assert battle["state"] == "in_progress"
+        assert battle["state"] == "对战中"
         assert battle["current_round"] == 1
         print(f"  ✓ sync_battle_started OK")
 
@@ -218,10 +218,10 @@ async def test_postgres_sync():
         print(f"  ✓ sync_round_result (battle_ended) OK")
 
         # ── 6. sync_deck_confirmed + check_both_decks_confirmed ──
-        # 重新初始化为 deck_selection 状态
+        # 重置为已初始化状态（模拟选牌阶段）
         async with pool.acquire() as conn:
             await conn.execute(
-                "UPDATE battles SET state = 'deck_selection' WHERE battle_id = $1",
+                "UPDATE battles SET state = '已初始化' WHERE battle_id = $1",
                 TEST_BATTLE_ID,
             )
 

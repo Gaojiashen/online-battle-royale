@@ -34,7 +34,7 @@ async def judge_pending(request: Request):
     try:
         rows = await pool.fetch(
             "SELECT battle_id, player_a_name, player_b_name "
-            "FROM battles WHERE state = 'initialized' "
+            "FROM battles WHERE state = '已初始化' "
             "ORDER BY created_at DESC"
         )
         pending = [

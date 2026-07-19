@@ -1,11 +1,8 @@
 """
 PostgresSync — PostgreSQL 持久化同步层。
 
-与 BaseSync 保持完全相同的公开方法签名。
 使用 asyncpg 连接池执行参数化 SQL。
 每个写操作保证事务一致性。
-
-Phase A: 仅写入，不替代 Feishu 读取。
 """
 
 import os
@@ -29,9 +26,9 @@ class PostgresSync:
     """
     PostgreSQL 同步层。
 
-    公开接口与 BaseSync 完全一致。
+    公开接口与 PersistenceWriter 完全一致。
     enabled 属性由 DATABASE_URL 环境变量控制：
-    - 未设置 → no-op（与 BaseSync FEISHU_APP_ID 未设置行为一致）
+    - 未设置 → no-op
     - 已设置 → 写入 PostgreSQL
     """
 
