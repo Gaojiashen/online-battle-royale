@@ -44,33 +44,37 @@ def _use_pg():
 
 async def lookup_player(name: str) -> dict:
     """按名称查找玩家，返回性相等级和当前对战信息"""
-    # 1. 查玩家战斗状态表 → 获取当前对战
-    battle = await _find_player_battle(name)
-    has_battle = battle is not None
-    battle_id = ""
-    battle_state = ""
-    if has_battle:
-        battle_id = battle["fields"].get("对战ID", "")
-        battle_state = await _get_battle_state(battle_id)
+    try:
+        # 1. 查玩家战斗状态表 → 获取当前对战
+        battle = await _find_player_battle(name)
+        has_battle = battle is not None
+        battle_id = ""
+        battle_state = ""
+        if has_battle:
+            battle_id = battle["fields"].get("对战ID", "")
+            battle_state = await _get_battle_state(battle_id)
 
-    # 2. 查玩家表 → 获取性相
-    aspects = {}
-    game_hp = 0
-    if _use_pg():
-        player = await _get_player_from_pg(_pg_pool, name)
-        if player is not None:
-            aspects = _extract_aspects(player["fields"])
-            game_hp = player["fields"].get("游戏HP", 0) or 0
+        # 2. 查玩家表 → 获取性相
+        aspects = {}
+        game_hp = 0
+        if _use_pg():
+            player = await _get_player_from_pg(_pg_pool, name)
+            if player is not None:
+                aspects = _extract_aspects(player["fields"])
+                game_hp = player["fields"].get("游戏HP", 0) or 0
 
-    return {
-        "ok": True,
-        "player_name": name,
-        "aspects": aspects,
-        "game_hp": game_hp,
-        "has_battle": has_battle,
-        "battle_id": battle_id,
-        "battle_state": battle_state,
-    }
+        return {
+            "ok": True,
+            "player_name": name,
+            "aspects": aspects,
+            "game_hp": game_hp,
+            "has_battle": has_battle,
+            "battle_id": battle_id,
+            "battle_state": battle_state,
+        }
+    except Exception:
+        logger.exception(f"lookup_player failed for name={name}")
+        raise
 
 
 # ════════════════════════════════════════════════════
@@ -846,6 +850,14 @@ def _deck_to_detail(deck_ids: List[str], include_effect: bool = True) -> List[di
             info["effect_text"] = card.effect_text if card else ""
         result.append(info)
     return result
+
+
+async def _get_battle_state(battle_id: str) -> str:
+    """查询对战状态。"""
+    record = await _get_battle_record(battle_id)
+    if record is None:
+        return ""
+    return record.get("fields", {}).get("状态", "")
 
 
 async def _get_battle_record(battle_id: str) -> Optional[dict]:

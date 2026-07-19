@@ -39,7 +39,11 @@ async def player_lookup(name: str = ""):
     """查找玩家信息"""
     if not name:
         return {"ok": False, "message": "请提供玩家名称"}
-    return await player_service.lookup_player(name)
+    try:
+        return await player_service.lookup_player(name)
+    except Exception:
+        logger.exception(f"player_lookup failed for name={name}")
+        raise HTTPException(status_code=500, detail="Internal server error — check logs")
 
 
 @router.get("/api/player/{name}/battles")
