@@ -20,6 +20,19 @@ from engine.events import BattleEvent, BattleEventType, EventBus, NullEventBus
 
 logger = logging.getLogger(__name__)
 
+# State name mapping: PG (Chinese) → BattleSession internal (English)
+_STATE_MAP = {
+    "已初始化": "deck_selection",
+    "选牌中": "deck_selection",
+    "对战中": "in_progress",
+    "已结束": "finished",
+}
+
+
+def _normalize_state(state_str: str) -> str:
+    """Normalize PG state name to BattleSession internal state."""
+    return _STATE_MAP.get(state_str, "in_progress")
+
 
 @dataclass
 class BattleSession:
@@ -246,7 +259,7 @@ class BattleManager:
             state_a=state_a,
             state_b=state_b,
             current_round=current_round,
-            state=state_str if state_str in ("in_progress", "finished") else "in_progress",
+            state=(_normalize_state(state_str) if state_str else "in_progress"),
             submission_a=submission_a,
             submission_b=submission_b,
             winner=bf.get("胜者", "") or None,

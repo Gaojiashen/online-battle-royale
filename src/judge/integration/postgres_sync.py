@@ -68,7 +68,7 @@ class PostgresSync:
                         INSERT INTO battles (battle_id, player_a_name, player_b_name,
                             player_a_aspects, player_b_aspects, state, current_round,
                             created_at, updated_at)
-                        VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, 'initialized', 0, $6, $6)
+                        VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, '已初始化', 0, $6, $6)
                         ON CONFLICT (battle_id) DO NOTHING
                         """,
                         battle_id,
@@ -140,7 +140,7 @@ class PostgresSync:
             result = await self._pool.execute(
                 """
                 UPDATE battles
-                SET state = 'in_progress', current_round = 1, updated_at = $2
+                SET state = '对战中', current_round = 1, updated_at = $2
                 WHERE battle_id = $1
                 """,
                 battle_id,
@@ -304,7 +304,7 @@ class PostgresSync:
                         await conn.execute(
                             """
                             UPDATE battles
-                            SET state = 'finished',
+                            SET state = '已结束',
                                 winner = $2,
                                 current_round = $3,
                                 updated_at = $4
