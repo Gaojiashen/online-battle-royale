@@ -9,5 +9,9 @@ services:
     buildCommand: pip install -r src/judge/requirements.txt
     startCommand: cd src/judge && uvicorn app:app --host 0.0.0.0 --port $PORT --ws-ping-interval 20 --ws-ping-timeout 10
     envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: onling-db
+          property: connectionString
       - key: DATABASE_READ_ENABLED
         value: true

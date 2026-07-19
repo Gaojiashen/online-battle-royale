@@ -62,8 +62,9 @@ async def lifespan(app: FastAPI):
 
     # ── Phase 5.1: PostgreSQL 持久化层 ──
     DATABASE_URL = os.environ.get("DATABASE_URL", "")
+    print(f"DATABASE_URL configured: {bool(DATABASE_URL)}")
     db_pool = None
-    postgres_sync = PostgresSync(pool=None)  # pool=None → enabled=False
+    postgres_sync = PostgresSync(pool=None)
     if DATABASE_URL:
         try:
             db_pool = await asyncpg.create_pool(
@@ -72,9 +73,16 @@ async def lifespan(app: FastAPI):
                 max_size=10,
             )
             postgres_sync = PostgresSync(pool=db_pool)
-            print(f"PostgreSQL 连接池已就绪 (2–10)")
+            print(f"Postgres pool ready: True (2–10)")
         except Exception as e:
-            print(f"PostgreSQL 连接失败: {e}")
+            print(f"Postgres pool ready: False ({e})")
+    else:
+        print("Postgres pool ready: False (no DATABASE_URL)")
+
+    # 注入到 player_service 读取层
+    from services.player_service import set_pg_read_pool
+    set_pg_read_pool(db_pool)
+    print(f"player_service pool injected: {db_pool is not None}")
 
     # ── PersistenceWorker → PostgresWriter → PostgreSQL ──
     writer = PostgresWriter(postgres_sync=postgres_sync)
@@ -106,6 +114,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # ── 优雅关闭 ──
+    set_pg_read_pool(None)
     if db_pool:
         await db_pool.close()
         print("PostgreSQL 连接池已关闭")

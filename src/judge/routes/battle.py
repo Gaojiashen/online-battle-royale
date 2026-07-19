@@ -29,7 +29,7 @@ async def battle_init(req: BattleInitRequest, request: Request):
     # 如果 aspects 未提供，从 PG 查询
     if not req.player_a_aspects or not req.player_b_aspects:
         if pool is None:
-            raise HTTPException(status_code=503, detail="数据库不可用")
+            raise HTTPException(status_code=503, detail="PostgreSQL connection unavailable – check DATABASE_URL")
         for name_key, attr_key in [
             (req.player_a_name, "player_a_aspects"),
             (req.player_b_name, "player_b_aspects"),
