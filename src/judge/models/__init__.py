@@ -6,8 +6,6 @@ Usage: from models import BattleInitRequest, CardInfo, ...
 from .requests import (
     BattleInitRequest,
     DeckConfirmRequest,
-    InitFromBaseRequest,
-    ConfirmFromBaseRequest,
     WebhookPayload,
 )
 from .responses import (
