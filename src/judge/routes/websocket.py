@@ -6,7 +6,7 @@ WebSocket 路由 — 实时战斗状态推送。
 """
 
 import logging
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
 
@@ -14,28 +14,19 @@ router = APIRouter()
 
 
 @router.websocket("/ws/battle/{battle_id}")
-async def battle_websocket(websocket: WebSocket, battle_id: str, request: Request):
+async def battle_websocket(websocket: WebSocket, battle_id: str):
     """
     战斗 WebSocket 端点。
-
-    流程:
-      1. accept 连接
-      2. 注册到 WebSocketManager
-      3. 保持连接（接收 ping / 发送 pong）
-      4. 断开时自动清理
-
-    客户端收到推送后应调用 GET /battle-full 获取完整状态。
+    通过 websocket.app.state 获取 WebSocketManager。
     """
-    ws_manager = request.app.state.ws_manager
+    ws_manager = websocket.app.state.ws_manager
 
     await websocket.accept()
     await ws_manager.connect(battle_id, websocket)
 
     try:
         while True:
-            # 接收客户端消息（ping 保活 / 任意消息）
             data = await websocket.receive_text()
-            # 回应 pong 保活
             if data == "ping":
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
