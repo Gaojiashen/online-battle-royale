@@ -12,17 +12,26 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# 由 app.py lifespan 注入
+_ws_manager = None
+
+
+def set_ws_manager(mgr):
+    global _ws_manager
+    _ws_manager = mgr
+
 
 @router.websocket("/ws/battle/{battle_id}")
 async def battle_websocket(websocket: WebSocket, battle_id: str):
     """
     战斗 WebSocket 端点。
-    通过 websocket.app.state 获取 WebSocketManager。
     """
-    ws_manager = websocket.app.state.ws_manager
+    if _ws_manager is None:
+        await websocket.close(code=1011, reason="WebSocketManager not initialized")
+        return
 
     await websocket.accept()
-    await ws_manager.connect(battle_id, websocket)
+    await _ws_manager.connect(battle_id, websocket)
 
     try:
         while True:
@@ -34,4 +43,4 @@ async def battle_websocket(websocket: WebSocket, battle_id: str):
     except Exception:
         logger.warning(f"WebSocket error: battle={battle_id}", exc_info=True)
     finally:
-        await ws_manager.disconnect(battle_id, websocket)
+        await _ws_manager.disconnect(battle_id, websocket)

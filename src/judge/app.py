@@ -50,6 +50,8 @@ async def lifespan(app: FastAPI):
 
     # ── Phase 3: WebSocket 实时推送 ──
     ws_manager = WebSocketManager()
+    from routes.websocket import set_ws_manager
+    set_ws_manager(ws_manager)
 
     # ── Phase 1: EventBus + PersistenceWorker ──
     event_bus = AsyncEventBus(
