@@ -172,11 +172,13 @@ def create_app() -> FastAPI:
     from routes.judge_panel import router as judge_router
     from routes.player_client import router as player_router
     from routes.websocket import router as websocket_router
+    from routes.admin import router as admin_router
 
     app.include_router(battle_router)
     app.include_router(judge_router)
     app.include_router(player_router)
     app.include_router(websocket_router)
+    app.include_router(admin_router)
 
     return app
 
